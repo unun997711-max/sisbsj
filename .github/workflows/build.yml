@@ -1,0 +1,3996 @@
+
+name: ILARION - Android APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ilarion-android-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ILARION Android Game
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK Packages
+        run: |
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # ILARION PARTS 2-9 WILL BE INSERTED HERE
+      # DO NOT REMOVE THIS POSITION
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ILARION-Android-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Generate Android Project
+        run: |
+          mkdir -p app/src/main/java/com/ilarion/game
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "ILARION"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.ilarion.game'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.ilarion.game'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0.0'
+              }
+
+              buildTypes {
+                  debug {
+                      minifyEnabled false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="ILARION"
+                  android:theme="@android:style/Theme.Material.NoActionBar"
+                  android:usesCleartextTraffic="true"
+                  android:supportsRtl="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="landscape"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowFullscreen">true</item>
+                  <item name="android:navigationBarColor">#080710</item>
+                  <item name="android:statusBarColor">#080710</item>
+                  <item name="android:windowLightStatusBar">false</item>
+              </style>
+          </resources>
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate ILARION Game Engine
+        run: |
+          cat > app/src/main/java/com/ilarion/game/MainActivity.java <<'EOF'
+          package com.ilarion.game;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.MotionEvent;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import android.graphics.Canvas;
+          import android.graphics.Paint;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.RectF;
+          import android.content.Context;
+          import android.os.Handler;
+          import android.os.Looper;
+          import java.util.Random;
+
+          public class MainActivity extends Activity {
+
+              private GameView game;
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  super.onCreate(state);
+
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+                  getWindow().setFlags(
+                      WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                      WindowManager.LayoutParams.FLAG_FULLSCREEN
+                  );
+
+                  game = new GameView(this);
+                  setContentView(game);
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  if (game != null) game.pause();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (game != null) game.resume();
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (game != null) {
+                      game.back();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+          }
+
+          class GameView extends View {
+
+              private final Paint p = new Paint();
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private final Random random = new Random();
+
+              private boolean running = true;
+              private boolean attacking = false;
+              private boolean movingLeft = false;
+              private boolean movingRight = false;
+
+              private int scene = 0;
+              private int episode = 1;
+              private int dialogue = 0;
+              private int playerHealth = 100;
+              private int enemyHealth = 100;
+
+              private float playerX = 180;
+              private float playerY = 0;
+              private float velocityY = 0;
+              private float cameraX = 0;
+              private float ground;
+              private float scale = 1;
+
+              private long lastFrame = 0;
+              private long animationTime = 0;
+
+              private String character = "LEVI";
+              private String currentSpeaker = "NARRATOR";
+              private String currentText = "Welcome to ILARION.";
+
+              private final String[] intro = {
+                  "بعد المواجهة المرعبة، لم تعد أركاديا كما كانت.",
+                  "ظهر أزراييل، ملك الفراغ، أمام ابنه ليفاي.",
+                  "ثمانية عشر عاماً مرت منذ آخر لقاء.",
+                  "لكن العهد القديم انتهى.",
+                  "الأسلحة الملعونة بدأت تستجيب لأصوات مجهولة.",
+                  "والسايركس أصبحت أكثر عدوانية.",
+                  "وفي أعماق العالم بدأت أربعة عروش تستيقظ.",
+                  "لقد بدأت حرب الآلهة."
+              };
+
+              private final Runnable frameTask = new Runnable() {
+                  @Override
+                  public void run() {
+                      if (!running) return;
+                      long now = System.nanoTime();
+                      if (lastFrame != 0) {
+                          float dt = Math.min(
+                              (now - lastFrame) / 1000000000f,
+                              0.05f
+                          );
+                          updateGame(dt);
+                      }
+                      lastFrame = now;
+                      invalidate();
+                      handler.postDelayed(this, 16);
+                  }
+              };
+
+              public GameView(Context context) {
+                  super(context);
+                  setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                  setFocusable(true);
+              }
+
+              public void pause() {
+                  running = false;
+                  handler.removeCallbacks(frameTask);
+              }
+
+              public void resume() {
+                  if (!running) {
+                      running = true;
+                      lastFrame = 0;
+                      handler.post(frameTask);
+                  }
+              }
+
+              public void back() {
+                  if (scene != 0) {
+                      scene = 0;
+                      invalidate();
+                  }
+              }
+
+              private void updateGame(float dt) {
+                  animationTime += (long)(dt * 1000);
+
+                  if (scene != 2) return;
+
+                  if (movingLeft) playerX -= 210 * dt;
+                  if (movingRight) playerX += 210 * dt;
+
+                  if (playerX < 30) playerX = 30;
+
+                  velocityY += 950 * dt;
+                  playerY += velocityY * dt;
+
+                  float floor = ground - 70;
+
+                  if (playerY > floor) {
+                      playerY = floor;
+                      velocityY = 0;
+                  }
+
+                  cameraX = Math.max(0, playerX - getWidth() * 0.38f);
+
+                  if (attacking && enemyHealth > 0) {
+                      enemyHealth -= 1;
+                      if (enemyHealth < 0) enemyHealth = 0;
+                  }
+              }
+
+              private void color(int c) {
+                  p.setColor(c);
+                  p.setStyle(Paint.Style.FILL);
+                  p.setStrokeWidth(1);
+                  p.setAntiAlias(false);
+              }
+
+              private void rect(Canvas c, float x, float y,
+                                float w, float h, int col) {
+                  color(col);
+                  c.drawRect(x, y, x + w, y + h, p);
+              }
+
+              private void pixel(Canvas c, float x, float y,
+                                 float size, int col) {
+                  rect(c, x, y, size, size, col);
+              }
+
+              private void text(Canvas c, String value,
+                                float x, float y, float size, int col) {
+                  color(col);
+                  p.setAntiAlias(true);
+                  p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+                  p.setTextSize(size);
+                  c.drawText(value, x, y, p);
+                  p.setAntiAlias(false);
+              }
+
+              private void drawBackground(Canvas c) {
+                  c.drawColor(Color.rgb(8, 12, 23));
+
+                  float w = getWidth();
+                  float h = getHeight();
+
+                  rect(c, 0, h * 0.55f, w, h * 0.45f,
+                      Color.rgb(13, 25, 30));
+
+                  for (int i = 0; i < 14; i++) {
+                      float x = (i * 173 - cameraX * 0.18f) % (w + 200);
+                      if (x < -100) x += w + 200;
+
+                      int treeHeight = 90 + (i * 37 % 110);
+
+                      rect(c, x, h * 0.55f - treeHeight,
+                          12, treeHeight, Color.rgb(19, 43, 40));
+
+                      rect(c, x - 22, h * 0.55f - treeHeight - 15,
+                          55, 38, Color.rgb(22, 65, 55));
+
+                      pixel(c, x - 15, h * 0.55f - treeHeight - 10,
+                          5, Color.rgb(70, 130, 90));
+                  }
+
+                  for (int i = 0; i < 45; i++) {
+                      float x = (i * 97 + animationTime / 35f) % w;
+                      float y = (i * 53) % (int)(h * 0.65f);
+
+                      pixel(c, x, y, 2,
+                          Color.rgb(83, 139, 120));
+                  }
+
+                  rect(c, 0, ground, w, h - ground,
+                      Color.rgb(27, 30, 39));
+
+                  rect(c, 0, ground, w, 5,
+                      Color.rgb(70, 95, 74));
+
+                  for (int i = 0; i < w / 16 + 2; i++) {
+                      float x = i * 16 - (cameraX % 16);
+                      pixel(c, x, ground + 12, 8,
+                          Color.rgb(41, 47, 48));
+                  }
+              }
+
+              private void drawLevi(Canvas c, float x, float y) {
+                  float s = Math.max(2, getWidth() / 240f);
+
+                  // Shadow
+                  rect(c, x - 10*s, y + 65*s, 30*s, 5*s,
+                      Color.rgb(4, 5, 8));
+
+                  // Legs
+                  rect(c, x - 2*s, y + 43*s, 8*s, 23*s,
+                      Color.rgb(28, 30, 39));
+                  rect(c, x + 7*s, y + 43*s, 8*s, 23*s,
+                      Color.rgb(28, 30, 39));
+
+                  // Boots
+                  rect(c, x - 4*s, y + 61*s, 11*s, 6*s,
+                      Color.rgb(12, 13, 20));
+                  rect(c, x + 6*s, y + 61*s, 13*s, 6*s,
+                      Color.rgb(12, 13, 20));
+
+                  // Black armor
+                  rect(c, x - 5*s, y + 23*s, 25*s, 23*s,
+                      Color.rgb(35, 39, 53));
+
+                  rect(c, x - 8*s, y + 27*s, 8*s, 17*s,
+                      Color.rgb(20, 24, 37));
+
+                  rect(c, x + 17*s, y + 27*s, 8*s, 17*s,
+                      Color.rgb(20, 24, 37));
+
+                  // Armor highlights
+                  pixel(c, x - 3*s, y + 25*s, 5*s,
+                      Color.rgb(107, 113, 137));
+
+                  pixel(c, x + 11*s, y + 33*s, 5*s,
+                      Color.rgb(112, 118, 137));
+
+                  // Neck
+                  rect(c, x + 3*s, y + 16*s, 10*s, 9*s,
+                      Color.rgb(218, 166, 139));
+
+                  // Face
+                  rect(c, x, y + 2*s, 17*s, 18*s,
+                      Color.rgb(235, 190, 159));
+
+                  // White hair
+                  rect(c, x - 3*s, y - 3*s, 21*s, 9*s,
+                      Color.rgb(225, 229, 237));
+
+                  pixel(c, x - 5*s, y + 3*s, 7*s,
+                      Color.rgb(201, 208, 221));
+
+                  pixel(c, x + 13*s, y + 1*s, 7*s,
+                      Color.rgb(240, 242, 248));
+
+                  // Eyes
+                  pixel(c, x + 11*s, y + 10*s, 3*s,
+                      Color.rgb(80, 175, 200));
+
+                  // First blade
+                  rect(c, x + 25*s, y + 16*s, 4*s, 43*s,
+                      Color.rgb(157, 205, 222));
+
+                  rect(c, x + 26*s, y + 18*s, 2*s, 38*s,
+                      Color.rgb(230, 245, 250));
+
+                  rect(c, x + 22*s, y + 34*s, 9*s, 4*s,
+                      Color.rgb(125, 85, 65));
+              }
+
+              private void drawHUD(Canvas c) {
+                  float w = getWidth();
+
+                  rect(c, 15, 15, 190, 42,
+                      Color.argb(210, 10, 12, 22));
+
+                  text(c, "LEVI", 25, 32, 14, Color.WHITE);
+
+                  rect(c, 25, 39, 150, 9,
+                      Color.rgb(60, 28, 38));
+
+                  rect(c, 25, 39, 150 * playerHealth / 100f, 9,
+                      Color.rgb(214, 48, 67));
+
+                  text(c, "EPISODE " + episode,
+                      w - 145, 35, 15, Color.WHITE);
+
+                  float cardWidth = 75;
+                  float start = w / 2 - 165;
+
+                  String[] names = {"LEVI", "AVIAN", "MIRA", "REN"};
+
+                  for (int i = 0; i < 4; i++) {
+                      float x = start + i * 83;
+
+                      rect(c, x, getHeight() - 62,
+                          cardWidth, 48,
+                          Color.argb(220, 15, 18, 29));
+
+                      rect(c, x, getHeight() - 62,
+                          cardWidth, 3,
+                          i == 0 ? Color.CYAN : Color.rgb(103, 110, 142));
+
+                      text(c, names[i], x + 7,
+                          getHeight() - 33, 10, Color.WHITE);
+
+                      rect(c, x + 7, getHeight() - 24,
+                          60, 5, Color.rgb(65, 28, 40));
+
+                      rect(c, x + 7, getHeight() - 24,
+                          55, 5, Color.rgb(190, 55, 76));
+                  }
+              }
+
+              private void drawDialogue(Canvas c) {
+                  float w = getWidth();
+                  float h = getHeight();
+
+                  rect(c, 18, h - 145, w - 36, 112,
+                      Color.argb(235, 7, 9, 18));
+
+                  rect(c, 18, h - 145, w - 36, 3,
+                      Color.rgb(107, 159, 192));
+
+                  text(c, currentSpeaker, 35, h - 115,
+                      15, Color.rgb(130, 207, 235));
+
+                  text(c, currentText, 35, h - 78,
+                      17, Color.WHITE);
+
+                  text(c, "TAP TO CONTINUE",
+                      w - 170, h - 45, 10,
+                      Color.rgb(150, 157, 180));
+              }
+
+              private void drawMenu(Canvas c) {
+                  float w = getWidth();
+                  float h = getHeight();
+
+                  c.drawColor(Color.rgb(7, 8, 17));
+
+                  text(c, "ILARION", w * 0.32f, h * 0.28f,
+                      55, Color.rgb(222, 229, 244));
+
+                  text(c, "THE WAR OF GODS",
+                      w * 0.35f, h * 0.35f,
+                      18, Color.rgb(112, 171, 205));
+
+                  rect(c, w * 0.30f, h * 0.48f,
+                      w * 0.40f, 55,
+                      Color.rgb(34, 49, 70));
+
+                  text(c, "NEW GAME",
+                      w * 0.43f, h * 0.52f,
+                      19, Color.WHITE);
+
+                  rect(c, w * 0.30f, h * 0.62f,
+                      w * 0.40f, 55,
+                      Color.rgb(26, 31, 47));
+
+                  text(c, "MULTIPLAYER",
+                      w * 0.41f, h * 0.66f,
+                      19, Color.WHITE);
+              }
+
+              private void drawGame(Canvas c) {
+                  drawBackground(c);
+
+                  c.save();
+                  c.translate(-cameraX, 0);
+
+                  drawLevi(c, playerX, playerY);
+
+                  if (enemyHealth > 0) {
+                      drawEnemy(c, playerX + 280);
+                  }
+
+                  c.restore();
+
+                  drawHUD(c);
+                  drawControls(c);
+
+                  if (scene == 1) {
+                      drawDialogue(c);
+                  }
+              }
+
+              private void drawEnemy(Canvas c, float x) {
+                  float y = ground - 100;
+
+                  rect(c, x, y + 20, 45, 55,
+                      Color.rgb(53, 26, 45));
+
+                  rect(c, x + 5, y, 35, 35,
+                      Color.rgb(80, 36, 53));
+
+                  rect(c, x + 7, y + 11, 7, 5,
+                      Color.rgb(255, 54, 67));
+
+                  rect(c, x + 29, y + 11, 7, 5,
+                      Color.rgb(255, 54, 67));
+
+                  rect(c, x - 7, y + 68, 18, 15,
+                      Color.rgb(34, 24, 35));
+
+                  rect(c, x + 32, y + 68, 18, 15,
+                      Color.rgb(34, 24, 35));
+              }
+
+              private void drawControls(Canvas c) {
+                  float w = getWidth();
+                  float h = getHeight();
+
+                  rect(c, 28, h - 115, 65, 65,
+                      Color.argb(125, 100, 120, 150));
+
+                  text(c, "<", 48, h - 75, 30, Color.WHITE);
+
+                  rect(c, 105, h - 115, 65, 65,
+                      Color.argb(125, 100, 120, 150));
+
+                  text(c, ">", 125, h - 75, 30, Color.WHITE);
+
+                  rect(c, w - 110, h - 120, 80, 75,
+                      Color.argb(170, 135, 48, 62));
+
+                  text(c, "ATK", w - 90, h - 75,
+                      17, Color.WHITE);
+
+                  rect(c, w - 205, h - 95, 65, 60,
+                      Color.argb(130, 70, 110, 160));
+
+                  text(c, "JUMP", w - 197, h - 60,
+                      12, Color.WHITE);
+              }
+
+              private void nextDialogue() {
+                  dialogue++;
+
+                  if (dialogue >= intro.length) {
+                      scene = 2;
+                      dialogue = 0;
+                      currentText = "";
+                      return;
+                  }
+
+                  currentSpeaker = "NARRATOR";
+                  currentText = intro[dialogue];
+              }
+
+              @Override
+              protected void onDraw(Canvas canvas) {
+                  super.onDraw(canvas);
+
+                  ground = getHeight() * 0.78f;
+
+                  if (scene == 0) {
+                      drawMenu(canvas);
+                  } else {
+                      drawGame(canvas);
+                  }
+              }
+
+              @Override
+              public boolean onTouchEvent(MotionEvent event) {
+                  float x = event.getX();
+                  float y = event.getY();
+
+                  float w = getWidth();
+                  float h = getHeight();
+
+                  if (event.getAction() == MotionEvent.ACTION_DOWN) {
+
+                      if (scene == 0) {
+                          if (y > h * 0.42f) {
+                              scene = 1;
+                              dialogue = 0;
+                              currentSpeaker = "NARRATOR";
+                              currentText = intro[0];
+                          }
+                          invalidate();
+                          return true;
+                      }
+
+                      if (scene == 1) {
+                          nextDialogue();
+                          invalidate();
+                          return true;
+                      }
+
+                      if (x < 95 && y > h - 140) {
+                          movingLeft = true;
+                      } else if (x < 185 && y > h - 140) {
+                          movingRight = true;
+                      } else if (x > w - 120 && y > h - 140) {
+                          attacking = true;
+                      } else if (x > w - 220 && y > h - 115) {
+                          if (playerY >= ground - 71) {
+                              velocityY = -440;
+                          }
+                      }
+
+                      return true;
+                  }
+
+                  if (event.getAction() == MotionEvent.ACTION_UP ||
+                      event.getAction() == MotionEvent.ACTION_CANCEL) {
+
+                      movingLeft = false;
+                      movingRight = false;
+                      attacking = false;
+
+                      return true;
+                  }
+
+                  return true;
+              }
+          }
+          EOF
+
+      - name: Build Android APK
+        run: |
+          gradle --no-daemon assembleDebug
+
+      - name: Add Pixel Art Character Animation System
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/src/main/java/com/ilarion/game/GameSprites.java")
+
+          path.write_text(r'''
+          package com.ilarion.game;
+
+          import android.graphics.Canvas;
+          import android.graphics.Paint;
+          import android.graphics.Color;
+          import java.util.Random;
+
+          public final class GameSprites {
+
+              private GameSprites() {}
+
+              private static final Paint paint = new Paint();
+
+              public static void pixel(Canvas c, Paint p,
+                                       int x, int y, int color, int size) {
+                  p.setColor(color);
+                  p.setStyle(Paint.Style.FILL);
+                  p.setAntiAlias(false);
+                  c.drawRect(x, y, x + size, y + size, p);
+              }
+
+              public static void drawLevi(Canvas c, Paint p,
+                                          float x, float y,
+                                          int frame, int size) {
+
+                  int armor = Color.rgb(37, 40, 55);
+                  int dark = Color.rgb(15, 17, 28);
+                  int silver = Color.rgb(210, 220, 232);
+                  int skin = Color.rgb(235, 190, 158);
+
+                  int step = frame % 2 == 0 ? 0 : size;
+
+                  pixel(c, p, (int)x, (int)y, dark, size * 12);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 15, silver, size * 6);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 12, silver, size * 8);
+
+                  pixel(c, p, (int)x + size * 4,
+                        (int)y - size * 9, skin, size * 5);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 5, armor, size * 7);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 4, dark, size * 2);
+
+                  pixel(c, p, (int)x + size * 8,
+                        (int)y - size * 4, dark, size * 2);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 1, armor, size * 3);
+
+                  pixel(c, p, (int)x + size * 7,
+                        (int)y - size * 1, armor, size * 3);
+
+                  pixel(c, p, (int)x + size * 4,
+                        (int)y - size * 11, silver, size * 2);
+
+                  pixel(c, p, (int)x + size * 7,
+                        (int)y - size * 10, Color.rgb(75, 174, 211), size);
+
+                  pixel(c, p, (int)x + size * 9,
+                        (int)y - size * 3, Color.rgb(175, 205, 225), size);
+
+                  pixel(c, p, (int)x + size * 10,
+                        (int)y - size * 8, silver, size);
+
+                  pixel(c, p, (int)x + size * 3 + step,
+                        (int)y + size, dark, size * 2);
+
+                  pixel(c, p, (int)x + size * 7 - step,
+                        (int)y + size, dark, size * 2);
+              }
+
+              public static void drawAvian(Canvas c, Paint p,
+                                           float x, float y,
+                                           int frame, int size) {
+
+                  int hair = Color.rgb(238, 180, 190);
+                  int skin = Color.rgb(248, 202, 180);
+                  int clothes = Color.rgb(65, 85, 135);
+                  int dark = Color.rgb(23, 29, 49);
+
+                  pixel(c, p, (int)x, (int)y, dark, size * 10);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 13, hair, size * 7);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 10, skin, size * 5);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 5, clothes, size * 6);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 2, dark, size * 3);
+
+                  pixel(c, p, (int)x + size * 6,
+                        (int)y - size * 2, dark, size * 3);
+
+                  pixel(c, p, (int)x + size * 7,
+                        (int)y - size * 10, hair, size * 3);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 9, Color.rgb(90, 140, 220), size);
+
+                  pixel(c, p, (int)x + size * 8,
+                        (int)y - size * 7, Color.rgb(170, 205, 255), size);
+
+                  pixel(c, p, (int)x + size * 9,
+                        (int)y - size * 12, hair, size * 2);
+              }
+
+              public static void drawMira(Canvas c, Paint p,
+                                          float x, float y, int size) {
+
+                  int hair = Color.rgb(105, 160, 205);
+                  int robe = Color.rgb(220, 225, 235);
+                  int skin = Color.rgb(245, 198, 177);
+
+                  pixel(c, p, (int)x, (int)y, robe, size * 10);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 12, hair, size * 6);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 9, skin, size * 5);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 5, robe, size * 7);
+
+                  pixel(c, p, (int)x + size * 4,
+                        (int)y - size * 7, Color.WHITE, size * 2);
+
+                  pixel(c, p, (int)x + size * 8,
+                        (int)y - size * 11, hair, size * 3);
+              }
+
+              public static void drawRen(Canvas c, Paint p,
+                                         float x, float y, int size) {
+
+                  int hair = Color.rgb(70, 55, 47);
+                  int clothes = Color.rgb(135, 55, 60);
+                  int skin = Color.rgb(225, 170, 145);
+
+                  pixel(c, p, (int)x, (int)y, clothes, size * 10);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 12, hair, size * 7);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 9, skin, size * 5);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 5, clothes, size * 7);
+
+                  pixel(c, p, (int)x + size * 4,
+                        (int)y - size * 7, Color.rgb(225, 90, 80), size);
+              }
+
+              public static void drawSirex(Canvas c, Paint p,
+                                           float x, float y,
+                                           int frame, int size) {
+
+                  int body = Color.rgb(65, 32, 56);
+                  int shadow = Color.rgb(24, 17, 34);
+                  int eye = Color.rgb(255, 45, 67);
+
+                  pixel(c, p, (int)x, (int)y, shadow, size * 12);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 12, body, size * 8);
+
+                  pixel(c, p, (int)x + size * 3,
+                        (int)y - size * 10, shadow, size * 5);
+
+                  pixel(c, p, (int)x + size * 4,
+                        (int)y - size * 8, eye, size);
+
+                  pixel(c, p, (int)x + size * 7,
+                        (int)y - size * 8, eye, size);
+
+                  pixel(c, p, (int)x + size * 2,
+                        (int)y - size * 2, shadow, size * 3);
+
+                  pixel(c, p, (int)x + size * 8,
+                        (int)y - size * 2, shadow, size * 3);
+
+                  pixel(c, p, (int)x + size * 10,
+                        (int)y - size * 13, body, size * 3);
+
+                  pixel(c, p, (int)x - size,
+                        (int)y - size * 13, body, size * 3);
+              }
+
+              public static void drawDivineAura(Canvas c, Paint p,
+                                                float x, float y,
+                                                int frame, int size) {
+
+                  int color = Color.argb(120, 100, 190, 255);
+
+                  p.setColor(color);
+                  p.setStyle(Paint.Style.STROKE);
+                  p.setStrokeWidth(size);
+
+                  int radius = size * (8 + frame % 3);
+
+                  c.drawCircle(x, y, radius, p);
+
+                  p.setStyle(Paint.Style.FILL);
+              }
+
+              public static void drawSpark(Canvas c, Paint p,
+                                           float x, float y,
+                                           int frame, int size) {
+
+                  int color = Color.rgb(130, 205, 255);
+
+                  pixel(c, p, (int)x, (int)y, color, size);
+                  pixel(c, p, (int)x + size, (int)y - size,
+                        Color.WHITE, size);
+                  pixel(c, p, (int)x - size, (int)y + size,
+                        color, size);
+              }
+          }
+          ''', encoding="utf-8")
+          PY
+
+      - name: Generate ILARION World and Enemy Systems
+        run: |
+          cat > app/src/main/java/com/ilarion/game/GameWorld.java <<'EOF'
+          package com.ilarion.game;
+
+          import java.util.ArrayList;
+          import java.util.Random;
+
+          public final class GameWorld {
+
+              public static final int FOREST = 0;
+              public static final int RUINS = 1;
+              public static final int ARCADIA = 2;
+              public static final int VOID = 3;
+              public static final int DIVINE_ARENA = 4;
+
+              public static final int SIREX = 0;
+              public static final int ORDER_GUARD = 1;
+              public static final int MEMORY_SHADE = 2;
+              public static final int TWISTED_BEAST = 3;
+              public static final int WAR_KNIGHT = 4;
+              public static final int BOSS = 5;
+
+              public static class Enemy {
+                  public float x;
+                  public float y;
+                  public float health;
+                  public float maxHealth;
+                  public float speed;
+                  public float attackTimer;
+                  public int type;
+                  public boolean alive;
+                  public boolean facingLeft;
+
+                  public Enemy(float x, float y, int type,
+                               float health, float speed) {
+                      this.x = x;
+                      this.y = y;
+                      this.type = type;
+                      this.health = health;
+                      this.maxHealth = health;
+                      this.speed = speed;
+                      this.alive = true;
+                  }
+
+                  public void damage(float amount) {
+                      if (!alive) return;
+                      health -= amount;
+                      if (health <= 0) {
+                          health = 0;
+                          alive = false;
+                      }
+                  }
+              }
+
+              public static class Particle {
+                  public float x;
+                  public float y;
+                  public float vx;
+                  public float vy;
+                  public float life;
+                  public int color;
+
+                  public Particle(float x, float y,
+                                  float vx, float vy,
+                                  float life, int color) {
+                      this.x = x;
+                      this.y = y;
+                      this.vx = vx;
+                      this.vy = vy;
+                      this.life = life;
+                      this.color = color;
+                  }
+
+                  public void update(float dt) {
+                      x += vx * dt;
+                      y += vy * dt;
+                      vy += 60 * dt;
+                      life -= dt;
+                  }
+              }
+
+              private final ArrayList<Enemy> enemies =
+                  new ArrayList<>();
+
+              private final ArrayList<Particle> particles =
+                  new ArrayList<>();
+
+              private final Random random = new Random();
+
+              private int worldType = FOREST;
+              private float worldWidth = 5000;
+              private float spawnTimer = 0;
+
+              public void setWorld(int type, float width) {
+                  worldType = type;
+                  worldWidth = Math.max(1000, width);
+                  enemies.clear();
+                  particles.clear();
+                  spawnTimer = 0;
+              }
+
+              public int getWorldType() {
+                  return worldType;
+              }
+
+              public float getWorldWidth() {
+                  return worldWidth;
+              }
+
+              public ArrayList<Enemy> getEnemies() {
+                  return enemies;
+              }
+
+              public ArrayList<Particle> getParticles() {
+                  return particles;
+              }
+
+              public void spawnEnemy(float x, float y, int type) {
+                  float hp;
+                  float speed;
+
+                  switch (type) {
+                      case ORDER_GUARD:
+                          hp = 130;
+                          speed = 55;
+                          break;
+
+                      case MEMORY_SHADE:
+                          hp = 90;
+                          speed = 85;
+                          break;
+
+                      case TWISTED_BEAST:
+                          hp = 180;
+                          speed = 100;
+                          break;
+
+                      case WAR_KNIGHT:
+                          hp = 250;
+                          speed = 65;
+                          break;
+
+                      case BOSS:
+                          hp = 2500;
+                          speed = 45;
+                          break;
+
+                      default:
+                          hp = 100;
+                          speed = 75;
+                          break;
+                  }
+
+                  enemies.add(new Enemy(x, y, type, hp, speed));
+              }
+
+              public void spawnEpisodeEnemies(int episode,
+                                              float ground) {
+                  enemies.clear();
+
+                  int count = 5 + Math.min(episode, 10);
+
+                  for (int i = 0; i < count; i++) {
+                      int type;
+
+                      if (episode <= 4) {
+                          type = SIREX;
+                      } else if (episode <= 8) {
+                          type = MEMORY_SHADE;
+                      } else if (episode <= 12) {
+                          type = ORDER_GUARD;
+                      } else if (episode <= 16) {
+                          type = TWISTED_BEAST;
+                      } else {
+                          type = WAR_KNIGHT;
+                      }
+
+                      float x = 450 + i * 270;
+                      spawnEnemy(x, ground, type);
+                  }
+
+                  if (episode == 5 || episode == 7 ||
+                      episode == 13 || episode == 17 ||
+                      episode == 24) {
+
+                      int bossType = episode == 5 ? ORDER_GUARD :
+                                     episode == 7 ? MEMORY_SHADE :
+                                     episode == 13 ? TWISTED_BEAST :
+                                     episode == 17 ? WAR_KNIGHT :
+                                     BOSS;
+
+                      spawnEnemy(worldWidth - 500,
+                                 ground, bossType == BOSS ?
+                                 BOSS : bossType);
+                  }
+              }
+
+              public void update(float dt, float playerX,
+                                 float playerY, float ground) {
+
+                  spawnTimer += dt;
+
+                  for (Enemy enemy : enemies) {
+                      if (!enemy.alive) continue;
+
+                      float distance = playerX - enemy.x;
+
+                      enemy.facingLeft = distance < 0;
+
+                      if (Math.abs(distance) > 48) {
+                          enemy.x += Math.signum(distance) *
+                              enemy.speed * dt;
+                      } else {
+                          enemy.attackTimer += dt;
+                      }
+
+                      if (enemy.attackTimer > 1.4f) {
+                          enemy.attackTimer = 0;
+                      }
+
+                      enemy.y = ground;
+                  }
+
+                  for (int i = particles.size() - 1; i >= 0; i--) {
+                      Particle particle = particles.get(i);
+                      particle.update(dt);
+
+                      if (particle.life <= 0) {
+                          particles.remove(i);
+                      }
+                  }
+
+                  for (int i = enemies.size() - 1; i >= 0; i--) {
+                      if (!enemies.get(i).alive) {
+                          enemies.remove(i);
+                      }
+                  }
+              }
+
+              public void createHitEffect(float x, float y) {
+                  for (int i = 0; i < 12; i++) {
+                      float angle = random.nextFloat() *
+                          (float)Math.PI * 2;
+
+                      float speed = 50 + random.nextFloat() * 130;
+
+                      float vx = (float)Math.cos(angle) * speed;
+                      float vy = (float)Math.sin(angle) * speed;
+
+                      particles.add(new Particle(
+                          x, y, vx, vy, 0.35f,
+                          0xFF9AD9FF
+                      ));
+                  }
+              }
+
+              public void createDeathEffect(float x, float y) {
+                  for (int i = 0; i < 25; i++) {
+                      float angle = random.nextFloat() *
+                          (float)Math.PI * 2;
+
+                      float speed = 40 + random.nextFloat() * 170;
+
+                      particles.add(new Particle(
+                          x, y,
+                          (float)Math.cos(angle) * speed,
+                          (float)Math.sin(angle) * speed,
+                          0.8f,
+                          0xFFB45A85
+                      ));
+                  }
+              }
+
+              public boolean hasEnemies() {
+                  return !enemies.isEmpty();
+              }
+
+              public void clearEnemies() {
+                  enemies.clear();
+              }
+          }
+          EOF
+
+      - name: Generate ILARION Combat System
+        run: |
+          cat > app/src/main/java/com/ilarion/game/CombatSystem.java <<'EOF'
+          package com.ilarion.game;
+
+          public final class CombatSystem {
+
+              public static final int FIRST_BLADE = 0;
+              public static final int STORM_LANTERN = 1;
+              public static final int DAWN_THREAD = 2;
+              public static final int VOID_BITE = 3;
+              public static final int HELL_HEART = 4;
+
+              public static class Fighter {
+                  public float x;
+                  public float y;
+                  public float health = 100;
+                  public float maxHealth = 100;
+                  public float energy = 100;
+                  public float attackCooldown;
+                  public float invulnerability;
+                  public float velocityX;
+                  public float velocityY;
+
+                  public boolean grounded = true;
+                  public boolean facingLeft;
+                  public boolean attacking;
+                  public boolean alive = true;
+
+                  public int weapon = FIRST_BLADE;
+                  public int character = 0;
+                  public int animationFrame;
+
+                  public void update(float dt) {
+                      attackCooldown = Math.max(
+                          0, attackCooldown - dt
+                      );
+
+                      invulnerability = Math.max(
+                          0, invulnerability - dt
+                      );
+
+                      energy = Math.min(
+                          100, energy + 8 * dt
+                      );
+
+                      x += velocityX * dt;
+                      y += velocityY * dt;
+
+                      velocityX *= Math.max(0, 1 - dt * 7);
+
+                      if (!grounded) {
+                          velocityY += 950 * dt;
+                      }
+
+                      if (health <= 0) {
+                          health = 0;
+                          alive = false;
+                      }
+
+                      animationFrame++;
+                  }
+
+                  public boolean jump() {
+                      if (!alive || !grounded) return false;
+
+                      velocityY = -440;
+                      grounded = false;
+                      return true;
+                  }
+
+                  public void land(float groundY) {
+                      if (y >= groundY) {
+                          y = groundY;
+                          velocityY = 0;
+                          grounded = true;
+                      }
+                  }
+
+                  public boolean takeDamage(float damage) {
+                      if (!alive || invulnerability > 0) {
+                          return false;
+                      }
+
+                      health -= damage;
+                      invulnerability = 0.8f;
+
+                      if (health <= 0) {
+                          health = 0;
+                          alive = false;
+                      }
+
+                      return true;
+                  }
+
+                  public void heal(float amount) {
+                      if (!alive) return;
+                      health = Math.min(maxHealth, health + amount);
+                  }
+              }
+
+              public static class Attack {
+                  public int weapon;
+                  public float damage;
+                  public float range;
+                  public float energyCost;
+                  public float duration;
+
+                  public Attack(int weapon, float damage,
+                                float range, float energyCost,
+                                float duration) {
+                      this.weapon = weapon;
+                      this.damage = damage;
+                      this.range = range;
+                      this.energyCost = energyCost;
+                      this.duration = duration;
+                  }
+              }
+
+              public static Attack createAttack(Fighter fighter) {
+                  switch (fighter.weapon) {
+                      case STORM_LANTERN:
+                          return new Attack(
+                              STORM_LANTERN, 42, 210, 18, 0.55f
+                          );
+
+                      case DAWN_THREAD:
+                          return new Attack(
+                              DAWN_THREAD, 28, 180, 12, 0.45f
+                          );
+
+                      case VOID_BITE:
+                          return new Attack(
+                              VOID_BITE, 65, 140, 30, 0.8f
+                          );
+
+                      case HELL_HEART:
+                          return new Attack(
+                              HELL_HEART, 80, 190, 40, 1.0f
+                          );
+
+                      default:
+                          return new Attack(
+                              FIRST_BLADE, 35, 100, 0, 0.35f
+                          );
+                  }
+              }
+
+              public static boolean attack(
+                  Fighter fighter,
+                  GameWorld world
+              ) {
+                  if (!fighter.alive ||
+                      fighter.attackCooldown > 0) {
+                      return false;
+                  }
+
+                  Attack attack = createAttack(fighter);
+
+                  if (fighter.energy < attack.energyCost) {
+                      return false;
+                  }
+
+                  fighter.energy -= attack.energyCost;
+                  fighter.attackCooldown = attack.duration;
+                  fighter.attacking = true;
+
+                  float direction = fighter.facingLeft ? -1 : 1;
+
+                  for (GameWorld.Enemy enemy :
+                       world.getEnemies()) {
+
+                      float distance = enemy.x - fighter.x;
+
+                      boolean inFront =
+                          direction * distance >= 0;
+
+                      if (inFront &&
+                          Math.abs(distance) <= attack.range) {
+
+                          enemy.damage(attack.damage);
+
+                          world.createHitEffect(
+                              enemy.x, enemy.y - 35
+                          );
+
+                          if (!enemy.alive) {
+                              world.createDeathEffect(
+                                  enemy.x, enemy.y - 35
+                              );
+                          }
+                      }
+                  }
+
+                  return true;
+              }
+
+              public static void changeWeapon(
+                  Fighter fighter, int weapon
+              ) {
+                  if (weapon < FIRST_BLADE ||
+                      weapon > HELL_HEART) {
+                      return;
+                  }
+
+                  fighter.weapon = weapon;
+              }
+
+              private CombatSystem() {}
+          }
+          EOF
+
+      - name: Generate ILARION Bosses and Enemy AI
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/ilarion/game
+          cat > app/src/main/java/com/ilarion/game/DivineBosses.java <<'EOF'
+          package com.ilarion.game;
+
+          import android.graphics.Canvas;
+          import android.graphics.Paint;
+          import android.graphics.RectF;
+          import java.util.ArrayList;
+          import java.util.Iterator;
+          import java.util.List;
+          import java.util.Random;
+
+          public final class DivineBosses {
+
+              public enum BossType {
+                  SERAPHON,
+                  MORGANETH,
+                  EVRA,
+                  DRAKON,
+                  VOID_EMPEROR
+              }
+
+              public enum EnemyType {
+                  SHADOW,
+                  DEMON,
+                  KNIGHT,
+                  ARCHER,
+                  WRAITH,
+                  GUARDIAN
+              }
+
+              public static final class Enemy {
+                  public float x;
+                  public float y;
+                  public float hp;
+                  public float maxHp;
+                  public float speed;
+                  public float damage;
+                  public float attackCooldown;
+                  public float attackTimer;
+                  public float animation;
+                  public float knockback;
+                  public int direction = 1;
+                  public boolean alive = true;
+                  public boolean attacking;
+                  public EnemyType type;
+
+                  Enemy(EnemyType type, float x, float y, float hp,
+                        float speed, float damage) {
+                      this.type = type;
+                      this.x = x;
+                      this.y = y;
+                      this.hp = hp;
+                      this.maxHp = hp;
+                      this.speed = speed;
+                      this.damage = damage;
+                      this.attackCooldown = 1.2f;
+                  }
+
+                  public void hurt(float amount, float force) {
+                      if (!alive) return;
+                      hp -= Math.max(0, amount);
+                      knockback = force;
+                      if (hp <= 0) {
+                          hp = 0;
+                          alive = false;
+                      }
+                  }
+              }
+
+              public static final class Boss {
+                  public final BossType type;
+                  public String name;
+                  public float x;
+                  public float y;
+                  public float hp;
+                  public float maxHp;
+                  public float damage;
+                  public float speed;
+                  public float phase;
+                  public float attackTimer;
+                  public float specialTimer;
+                  public float animation;
+                  public float flashTimer;
+                  public int direction = -1;
+                  public int attackPattern;
+                  public boolean alive = true;
+                  public boolean enraged;
+                  public boolean defeated;
+
+                  Boss(BossType type, String name, float hp,
+                       float damage, float speed) {
+                      this.type = type;
+                      this.name = name;
+                      this.hp = hp;
+                      this.maxHp = hp;
+                      this.damage = damage;
+                      this.speed = speed;
+                      this.attackTimer = 1.5f;
+                      this.specialTimer = 4f;
+                  }
+
+                  public float healthPercent() {
+                      return maxHp <= 0 ? 0 : hp / maxHp;
+                  }
+
+                  public void takeDamage(float amount) {
+                      if (!alive) return;
+                      hp -= Math.max(0, amount);
+                      flashTimer = 0.15f;
+                      if (healthPercent() <= 0.35f) {
+                          enraged = true;
+                          speed *= 1.0005f;
+                      }
+                      if (hp <= 0) {
+                          hp = 0;
+                          alive = false;
+                          defeated = true;
+                      }
+                  }
+              }
+
+              public static final class Projectile {
+                  public float x;
+                  public float y;
+                  public float vx;
+                  public float vy;
+                  public float radius;
+                  public float damage;
+                  public float life = 4f;
+                  public boolean hostile = true;
+                  public boolean active = true;
+
+                  Projectile(float x, float y, float vx, float vy,
+                             float radius, float damage) {
+                      this.x = x;
+                      this.y = y;
+                      this.vx = vx;
+                      this.vy = vy;
+                      this.radius = radius;
+                      this.damage = damage;
+                  }
+
+                  void update(float dt) {
+                      x += vx * dt;
+                      y += vy * dt;
+                      life -= dt;
+                      if (life <= 0) active = false;
+                  }
+              }
+
+              private final List<Enemy> enemies = new ArrayList<>();
+              private final List<Projectile> projectiles = new ArrayList<>();
+              private final Random random = new Random();
+              private Boss boss;
+              private float worldWidth = 5000;
+              private float groundY = 500;
+              private float spawnTimer;
+              private int wave = 1;
+              private int defeatedCount;
+
+              public void configure(float width, float ground) {
+                  worldWidth = Math.max(800, width);
+                  groundY = ground;
+              }
+
+              public void clear() {
+                  enemies.clear();
+                  projectiles.clear();
+                  boss = null;
+                  spawnTimer = 0;
+                  defeatedCount = 0;
+                  wave = 1;
+              }
+
+              public void startWave(int waveNumber) {
+                  wave = Math.max(1, waveNumber);
+                  enemies.clear();
+                  projectiles.clear();
+                  int count = Math.min(18, 3 + wave * 2);
+                  for (int i = 0; i < count; i++) {
+                      float x = 450 + i * 180 + random.nextInt(100);
+                      spawnEnemy(randomEnemy(), x);
+                  }
+                  if (wave % 5 == 0) {
+                      spawnBoss(bossForWave(wave));
+                  }
+              }
+
+              private EnemyType randomEnemy() {
+                  int roll = random.nextInt(100);
+                  if (roll < 28) return EnemyType.SHADOW;
+                  if (roll < 48) return EnemyType.DEMON;
+                  if (roll < 66) return EnemyType.KNIGHT;
+                  if (roll < 82) return EnemyType.ARCHER;
+                  if (roll < 94) return EnemyType.WRAITH;
+                  return EnemyType.GUARDIAN;
+              }
+
+              public void spawnEnemy(EnemyType type, float x) {
+                  float scale = 1f + Math.min(3f, wave * 0.08f);
+                  float hp;
+                  float speed;
+                  float damage;
+                  switch (type) {
+                      case DEMON:
+                          hp = 115; speed = 68; damage = 18;
+                          break;
+                      case KNIGHT:
+                          hp = 180; speed = 38; damage = 25;
+                          break;
+                      case ARCHER:
+                          hp = 75; speed = 42; damage = 14;
+                          break;
+                      case WRAITH:
+                          hp = 90; speed = 82; damage = 20;
+                          break;
+                      case GUARDIAN:
+                          hp = 240; speed = 28; damage = 32;
+                          break;
+                      default:
+                          hp = 65; speed = 55; damage = 12;
+                          break;
+                  }
+                  enemies.add(new Enemy(type, clamp(x, 80, worldWidth - 80),
+                          groundY, hp * scale, speed, damage * scale));
+              }
+
+              private BossType bossForWave(int number) {
+                  int index = ((number / 5) - 1) % 5;
+                  return BossType.values()[index];
+              }
+
+              public void spawnBoss(BossType type) {
+                  String name;
+                  float hp;
+                  float damage;
+                  float speed;
+                  switch (type) {
+                      case SERAPHON:
+                          name = "SERAPHON - THE FALLEN LIGHT";
+                          hp = 1800; damage = 32; speed = 55;
+                          break;
+                      case MORGANETH:
+                          name = "MORGANETH - LORD OF SHADOWS";
+                          hp = 2400; damage = 38; speed = 62;
+                          break;
+                      case EVRA:
+                          name = "EVRA - THE BLOOD ORACLE";
+                          hp = 2100; damage = 35; speed = 78;
+                          break;
+                      case DRAKON:
+                          name = "DRAKON - THE ETERNAL FLAME";
+                          hp = 3200; damage = 48; speed = 48;
+                          break;
+                      default:
+                          name = "THE VOID EMPEROR";
+                          hp = 5000; damage = 60; speed = 70;
+                          break;
+                  }
+                  boss = new Boss(type, name, hp, damage, speed);
+                  boss.x = worldWidth - 300;
+                  boss.y = groundY;
+              }
+
+              public void update(float dt, float playerX, float playerY) {
+                  dt = Math.min(0.05f, Math.max(0, dt));
+                  spawnTimer += dt;
+
+                  Iterator<Enemy> iterator = enemies.iterator();
+                  while (iterator.hasNext()) {
+                      Enemy enemy = iterator.next();
+                      if (!enemy.alive) {
+                          defeatedCount++;
+                          iterator.remove();
+                          continue;
+                      }
+                      updateEnemy(enemy, dt, playerX, playerY);
+                  }
+
+                  for (Projectile projectile : projectiles) {
+                      projectile.update(dt);
+                  }
+                  Iterator<Projectile> shots = projectiles.iterator();
+                  while (shots.hasNext()) {
+                      if (!shots.next().active) shots.remove();
+                  }
+
+                  if (boss != null && boss.alive) {
+                      updateBoss(dt, playerX, playerY);
+                  }
+              }
+
+              private void updateEnemy(Enemy enemy, float dt,
+                                       float playerX, float playerY) {
+                  enemy.animation += dt * 7f;
+                  enemy.attackTimer -= dt;
+
+                  if (enemy.knockback != 0) {
+                      enemy.x += enemy.knockback * dt;
+                      enemy.knockback *= Math.max(0, 1f - dt * 7f);
+                      if (Math.abs(enemy.knockback) < 2) enemy.knockback = 0;
+                  }
+
+                  float dx = playerX - enemy.x;
+                  float distance = Math.abs(dx);
+                  enemy.direction = dx >= 0 ? 1 : -1;
+
+                  if (enemy.type == EnemyType.ARCHER) {
+                      if (distance > 250) {
+                          enemy.x += enemy.direction * enemy.speed * dt;
+                      } else if (distance < 160) {
+                          enemy.x -= enemy.direction * enemy.speed * dt;
+                      }
+                      if (distance < 550 && enemy.attackTimer <= 0) {
+                          float angle = (float) Math.atan2(
+                                  playerY - enemy.y - 40, dx);
+                          projectiles.add(new Projectile(
+                                  enemy.x, enemy.y - 55,
+                                  (float) Math.cos(angle) * 300,
+                                  (float) Math.sin(angle) * 300,
+                                  9, enemy.damage));
+                          enemy.attackTimer = 2.2f;
+                      }
+                  } else {
+                      if (distance > 58) {
+                          enemy.x += enemy.direction * enemy.speed * dt;
+                      } else if (enemy.attackTimer <= 0) {
+                          enemy.attacking = true;
+                          enemy.attackTimer = enemy.attackCooldown;
+                      } else {
+                          enemy.attacking = false;
+                      }
+                  }
+                  enemy.x = clamp(enemy.x, 50, worldWidth - 50);
+              }
+
+              private void updateBoss(float dt, float playerX, float playerY) {
+                  boss.animation += dt * 3f;
+                  boss.attackTimer -= dt;
+                  boss.specialTimer -= dt;
+                  boss.flashTimer = Math.max(0, boss.flashTimer - dt);
+
+                  float dx = playerX - boss.x;
+                  boss.direction = dx >= 0 ? 1 : -1;
+                  float distance = Math.abs(dx);
+                  float speed = boss.speed * (boss.enraged ? 1.45f : 1f);
+
+                  if (distance > 125) {
+                      boss.x += boss.direction * speed * dt;
+                  }
+
+                  if (boss.attackTimer <= 0) {
+                      if (distance < 175) {
+                          boss.attackPattern = 1;
+                          boss.attackTimer = boss.enraged ? 0.9f : 1.5f;
+                      } else {
+                          boss.attackPattern = 2;
+                          boss.attackTimer = boss.enraged ? 1.4f : 2.2f;
+                          fireAtPlayer(playerX, playerY);
+                      }
+                  }
+
+                  if (boss.specialTimer <= 0) {
+                      boss.attackPattern = 3;
+                      boss.specialTimer = boss.enraged ? 3f : 5f;
+                      specialAttack(playerX, playerY);
+                  }
+
+                  boss.x = clamp(boss.x, 100, worldWidth - 100);
+              }
+
+              private void fireAtPlayer(float playerX, float playerY) {
+                  int count = boss.enraged ? 5 : 3;
+                  for (int i = 0; i < count; i++) {
+                      float spread = (i - (count - 1) / 2f) * 0.16f;
+                      float angle = (float) Math.atan2(
+                              playerY - boss.y - 80, playerX - boss.x) + spread;
+                      projectiles.add(new Projectile(
+                              boss.x, boss.y - 80,
+                              (float) Math.cos(angle) * 360,
+                              (float) Math.sin(angle) * 360,
+                              15, boss.damage));
+                  }
+              }
+
+              private void specialAttack(float playerX, float playerY) {
+                  switch (boss.type) {
+                      case SERAPHON:
+                          for (int i = 0; i < 7; i++) {
+                              projectiles.add(new Projectile(
+                                      playerX - 180 + i * 60, 30,
+                                      0, 260, 18, boss.damage * 0.8f));
+                          }
+                          break;
+                      case MORGANETH:
+                          for (int i = 0; i < 8; i++) {
+                              float angle = (float) (Math.PI * 2 * i / 8);
+                              projectiles.add(new Projectile(
+                                      boss.x, boss.y - 70,
+                                      (float) Math.cos(angle) * 230,
+                                      (float) Math.sin(angle) * 230,
+                                      16, boss.damage));
+                          }
+                          break;
+                      case EVRA:
+                          for (int i = 0; i < 4; i++) {
+                              projectiles.add(new Projectile(
+                                      boss.x + (i - 2) * 55, boss.y - 40,
+                                      boss.direction * 260, -80 + i * 45,
+                                      13, boss.damage));
+                          }
+                          break;
+                      case DRAKON:
+                          for (int i = 0; i < 9; i++) {
+                              projectiles.add(new Projectile(
+                                      boss.x, boss.y - 65,
+                                      boss.direction * (180 + i * 18),
+                                      -100 + i * 28, 19, boss.damage));
+                          }
+                          break;
+                      default:
+                          for (int i = 0; i < 12; i++) {
+                              float angle = (float) (Math.PI * 2 * i / 12);
+                              projectiles.add(new Projectile(
+                                      boss.x, boss.y - 90,
+                                      (float) Math.cos(angle) * 300,
+                                      (float) Math.sin(angle) * 300,
+                                      20, boss.damage));
+                          }
+                          break;
+                  }
+              }
+
+              public void damageEnemies(float x, float y, float range,
+                                        float damage, float knockback) {
+                  for (Enemy enemy : enemies) {
+                      if (!enemy.alive) continue;
+                      float dx = enemy.x - x;
+                      float dy = enemy.y - y;
+                      if (dx * dx + dy * dy <= range * range) {
+                          enemy.hurt(damage, Math.signum(dx) * knockback);
+                      }
+                  }
+                  if (boss != null && boss.alive) {
+                      float dx = boss.x - x;
+                      float dy = boss.y - y;
+                      if (dx * dx + dy * dy <= (range + 70) * (range + 70)) {
+                          boss.takeDamage(damage * 0.55f);
+                      }
+                  }
+              }
+
+              public float checkProjectileHits(float playerX, float playerY,
+                                               float radius) {
+                  float totalDamage = 0;
+                  for (Projectile projectile : projectiles) {
+                      if (!projectile.active || !projectile.hostile) continue;
+                      float dx = projectile.x - playerX;
+                      float dy = projectile.y - playerY;
+                      float reach = radius + projectile.radius;
+                      if (dx * dx + dy * dy <= reach * reach) {
+                          totalDamage += projectile.damage;
+                          projectile.active = false;
+                      }
+                  }
+                  return totalDamage;
+              }
+
+              public float checkEnemyContact(float playerX, float playerY,
+                                             float radius) {
+                  float damage = 0;
+                  for (Enemy enemy : enemies) {
+                      if (!enemy.alive) continue;
+                      float dx = enemy.x - playerX;
+                      float dy = enemy.y - playerY;
+                      if (dx * dx + dy * dy < radius * radius
+                              && enemy.attackTimer > 0.65f) {
+                          damage += enemy.damage;
+                      }
+                  }
+                  if (boss != null && boss.alive) {
+                      float dx = boss.x - playerX;
+                      float dy = boss.y - playerY;
+                      if (dx * dx + dy * dy < (radius + 80) * (radius + 80)
+                              && boss.attackPattern == 1) {
+                          damage += boss.damage;
+                      }
+                  }
+                  return damage;
+              }
+
+              public void draw(Canvas canvas, Paint paint, float cameraX) {
+                  for (Enemy enemy : enemies) {
+                      if (enemy.alive) drawEnemy(canvas, paint, enemy, cameraX);
+                  }
+                  for (Projectile projectile : projectiles) {
+                      if (!projectile.active) continue;
+                      paint.setColor(0xFFFF5733);
+                      canvas.drawCircle(projectile.x - cameraX,
+                              projectile.y, projectile.radius, paint);
+                      paint.setColor(0xFFFFC36A);
+                      canvas.drawCircle(projectile.x - cameraX,
+                              projectile.y, projectile.radius * 0.45f, paint);
+                  }
+                  if (boss != null && boss.alive) {
+                      drawBoss(canvas, paint, cameraX);
+                  }
+              }
+
+              private void drawEnemy(Canvas canvas, Paint paint,
+                                     Enemy enemy, float cameraX) {
+                  float x = enemy.x - cameraX;
+                  float y = enemy.y;
+                  int body = 0xFF382B48;
+                  int glow = 0xFFB23B67;
+                  switch (enemy.type) {
+                      case DEMON:
+                          body = 0xFF792D35;
+                          glow = 0xFFFF7048;
+                          break;
+                      case KNIGHT:
+                          body = 0xFF505A70;
+                          glow = 0xFFB7C5D8;
+                          break;
+                      case ARCHER:
+                          body = 0xFF315C50;
+                          glow = 0xFF8BE6A2;
+                          break;
+                      case WRAITH:
+                          body = 0xFF4C467C;
+                          glow = 0xFFB5A7FF;
+                          break;
+                      case GUARDIAN:
+                          body = 0xFF76613D;
+                          glow = 0xFFFFD17A;
+                          break;
+                      default:
+                          break;
+                  }
+                  paint.setColor(body);
+                  canvas.drawRect(x - 19, y - 57, x + 19, y, paint);
+                  canvas.drawRect(x - 24, y - 49, x + 24, y - 22, paint);
+                  paint.setColor(glow);
+                  canvas.drawRect(x - 12, y - 47, x - 4, y - 39, paint);
+                  canvas.drawRect(x + 4, y - 47, x + 12, y - 39, paint);
+                  paint.setColor(0xFF17131E);
+                  canvas.drawRect(x - 14, y - 15, x - 5, y, paint);
+                  canvas.drawRect(x + 5, y - 15, x + 14, y, paint);
+
+                  paint.setColor(0xFF160F1A);
+                  canvas.drawRect(x - 22, y - 68, x + 22, y - 64, paint);
+                  paint.setColor(0xFFB52D42);
+                  canvas.drawRect(x - 22, y - 68,
+                          x - 22 + 44 * Math.max(0, enemy.hp / enemy.maxHp),
+                          y - 64, paint);
+              }
+
+              private void drawBoss(Canvas canvas, Paint paint, float cameraX) {
+                  float x = boss.x - cameraX;
+                  float y = boss.y;
+                  int body;
+                  int aura;
+                  switch (boss.type) {
+                      case SERAPHON:
+                          body = 0xFFB7A66B;
+                          aura = 0xFFFFE8A0;
+                          break;
+                      case MORGANETH:
+                          body = 0xFF30203F;
+                          aura = 0xFFAA4DDB;
+                          break;
+                      case EVRA:
+                          body = 0xFF6C253B;
+                          aura = 0xFFFF547A;
+                          break;
+                      case DRAKON:
+                          body = 0xFF7A3023;
+                          aura = 0xFFFF9B42;
+                          break;
+                      default:
+                          body = 0xFF171321;
+                          aura = 0xFF8B65FF;
+                          break;
+                  }
+
+                  float pulse = (float) Math.sin(boss.animation) * 5f;
+                  paint.setColor(0x55300055);
+                  canvas.drawOval(new RectF(x - 75, y - 18,
+                          x + 75, y + 8), paint);
+                  paint.setColor(body);
+                  canvas.drawRect(x - 48, y - 145 - pulse,
+                          x + 48, y, paint);
+                  canvas.drawRect(x - 65, y - 125,
+                          x + 65, y - 62, paint);
+                  canvas.drawRect(x - 40, y - 185 - pulse,
+                          x + 40, y - 130, paint);
+
+                  paint.setColor(aura);
+                  canvas.drawRect(x - 28, y - 174 - pulse,
+                          x - 13, y - 160 - pulse, paint);
+                  canvas.drawRect(x + 13, y - 174 - pulse,
+                          x + 28, y - 160 - pulse, paint);
+                  canvas.drawRect(x - 80, y - 135,
+                          x - 60, y - 75, paint);
+                  canvas.drawRect(x + 60, y - 135,
+                          x + 80, y - 75, paint);
+
+                  if (boss.enraged) {
+                      paint.setColor(0x66FF2222);
+                      canvas.drawCircle(x, y - 90, 105 + pulse, paint);
+                  }
+
+                  float barWidth = 300;
+                  float left = (canvas.getWidth() - barWidth) / 2f;
+                  paint.setColor(0xFF201724);
+                  canvas.drawRect(left, 24, left + barWidth, 40, paint);
+                  paint.setColor(0xFFB52B50);
+                  canvas.drawRect(left, 24,
+                          left + barWidth * boss.healthPercent(), 40, paint);
+                  paint.setColor(0xFFFFFFFF);
+                  paint.setTextSize(18);
+                  paint.setTextAlign(Paint.Align.CENTER);
+                  canvas.drawText(boss.name, canvas.getWidth() / 2f, 18, paint);
+                  paint.setTextAlign(Paint.Align.LEFT);
+              }
+
+              public List<Enemy> getEnemies() {
+                  return enemies;
+              }
+
+              public List<Projectile> getProjectiles() {
+                  return projectiles;
+              }
+
+              public Boss getBoss() {
+                  return boss;
+              }
+
+              public int getDefeatedCount() {
+                  return defeatedCount;
+              }
+
+              public int getWave() {
+                  return wave;
+              }
+
+              public boolean isWaveCleared() {
+                  return enemies.isEmpty() && (boss == null || !boss.alive);
+              }
+
+              public boolean hasBoss() {
+                  return boss != null && boss.alive;
+              }
+
+              private static float clamp(float value, float min, float max) {
+                  return Math.max(min, Math.min(max, value));
+              }
+          }
+          EOF
+      - name: Generate ILARION Story Campaign System
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/ilarion/game
+          cat > app/src/main/java/com/ilarion/game/StoryCampaign.java <<'EOF'
+          package com.ilarion.game;
+
+          import java.util.ArrayList;
+          import java.util.Collections;
+          import java.util.List;
+
+          public class StoryCampaign {
+
+              public static class DialogueLine {
+                  public final String speaker;
+                  public final String text;
+
+                  public DialogueLine(String speaker, String text) {
+                      this.speaker = speaker;
+                      this.text = text;
+                  }
+              }
+
+              public static class StoryChoice {
+                  public final String text;
+                  public final int nextScene;
+
+                  public StoryChoice(String text, int nextScene) {
+                      this.text = text;
+                      this.nextScene = nextScene;
+                  }
+              }
+
+              public static class Episode {
+                  public final int number;
+                  public final String title;
+                  public final String description;
+                  public final List<DialogueLine> dialogue = new ArrayList<>();
+                  public final List<StoryChoice> choices = new ArrayList<>();
+                  public boolean completed = false;
+                  public boolean unlocked = false;
+
+                  public Episode(int number, String title, String description) {
+                      this.number = number;
+                      this.title = title;
+                      this.description = description;
+                  }
+
+                  public void addDialogue(String speaker, String text) {
+                      dialogue.add(new DialogueLine(speaker, text));
+                  }
+
+                  public void addChoice(String text, int nextScene) {
+                      choices.add(new StoryChoice(text, nextScene));
+                  }
+              }
+
+              public static class Season {
+                  public final int number;
+                  public final String title;
+                  public final String subtitle;
+                  public final List<Episode> episodes = new ArrayList<>();
+                  public boolean unlocked = false;
+
+                  public Season(int number, String title, String subtitle) {
+                      this.number = number;
+                      this.title = title;
+                      this.subtitle = subtitle;
+                  }
+              }
+
+              private final List<Season> seasons = new ArrayList<>();
+              private int currentSeason = 0;
+              private int currentEpisode = 0;
+              private int currentDialogue = 0;
+              private int currentScene = 0;
+              private boolean waitingForChoice = false;
+
+              public StoryCampaign() {
+                  buildCampaign();
+              }
+
+              private void buildCampaign() {
+                  addSeason(1, "بداية إيلاريون", "THE AWAKENING");
+                  addSeason(2, "حرب الآلهة", "WAR OF THE GODS");
+                  addSeason(3, "عهد الظلال", "THE SHADOWS");
+                  addSeason(4, "نهاية الخلق", "THE END OF CREATION");
+
+                  seasons.get(0).unlocked = true;
+                  seasons.get(0).episodes.get(0).unlocked = true;
+              }
+
+              private void addSeason(int number, String title, String subtitle) {
+                  Season season = new Season(number, title, subtitle);
+
+                  for (int i = 1; i <= 24; i++) {
+                      String episodeTitle = getEpisodeTitle(number, i);
+                      String description = getEpisodeDescription(number, i);
+
+                      Episode episode = new Episode(i, episodeTitle, description);
+                      populateEpisode(season, episode, i);
+                      season.episodes.add(episode);
+                  }
+
+                  seasons.add(season);
+              }
+
+              private String getEpisodeTitle(int season, int episode) {
+                  if (season == 2) {
+                      if (episode == 1) return "بداية حرب الآلهة";
+                      if (episode == 12) return "سقوط العرش";
+                      if (episode == 24) return "نهاية الحرب";
+                  }
+
+                  if (season == 4) {
+                      if (episode == 1) return "آخر فجر";
+                      if (episode == 6) return "نداء الفراغ";
+                      if (episode == 12) return "انكسار السماء";
+                      if (episode == 18) return "مصير الآلهة";
+                      if (episode == 24) return "نهاية الخلق";
+                  }
+
+                  return "الحلقة " + episode;
+              }
+
+              private String getEpisodeDescription(int season, int episode) {
+                  if (season == 2) {
+                      return "تتقدم أحداث حرب الآلهة، ويقترب إيلاريون من مواجهة مصيره.";
+                  }
+
+                  if (season == 4) {
+                      return "تقترب نهاية الخلق، ويصبح قرار الأبطال أهم من أي وقت مضى.";
+                  }
+
+                  return "تتواصل رحلة أبطال إيلاريون وتنكشف أسرار العالم تدريجياً.";
+              }
+
+              private void populateEpisode(Season season, Episode episode, int number) {
+                  if (season.number == 1 && number == 1) {
+                      episode.addDialogue("Levi", "لا أعرف ما الذي ينتظرني خلف هذا الظلام...");
+                      episode.addDialogue("Avian", "لن تواجه هذا الطريق وحدك. أنا معك.");
+                      episode.addDialogue("Mira", "هناك قوة قديمة تتحرك في هذا العالم.");
+                      episode.addDialogue("Ren", "علينا أن نعرف الحقيقة قبل فوات الأوان.");
+                      episode.addDialogue("Levi", "إذن تبدأ رحلتنا الآن.");
+                  } else if (season.number == 2 && number == 1) {
+                      episode.addDialogue("Narrator", "بدأت حرب الآلهة، واهتز العالم تحت قوة السماء.");
+                      episode.addDialogue("Levi", "لن أسمح لهذه الحرب أن تبتلع الأبرياء.");
+                      episode.addDialogue("Avian", "علينا أن نبقى معاً مهما حدث.");
+                      episode.addDialogue("Sirex", "القوة وحدها لن تنقذ هذا العالم.");
+                  } else if (season.number == 4 && number == 24) {
+                      episode.addDialogue("Narrator", "وصلت الحكاية إلى نهايتها. لم يعد الخلق كما كان.");
+                      episode.addDialogue("Avian", "مهما كانت النهاية، لن أنسى ما عشنا.");
+                      episode.addDialogue("Levi", "كل تضحية أوصلتنا إلى هذه اللحظة.");
+                      episode.addDialogue("Narrator", "هنا تنتهي رحلة إيلاريون.");
+                  } else {
+                      episode.addDialogue("Narrator", episode.description);
+                      episode.addDialogue("Levi", "لن أتراجع الآن.");
+                      episode.addDialogue("Avian", "أنا أثق بك. لنكمل الطريق.");
+                      episode.addDialogue("Mira", "يجب أن نكون مستعدين لما سيأتي.");
+                      episode.addDialogue("Ren", "القرار لنا، والنتيجة ستغير كل شيء.");
+                  }
+
+                  episode.addChoice("متابعة القصة", 0);
+                  episode.addChoice("الاستعداد للمعركة", 1);
+              }
+
+              public List<Season> getSeasons() {
+                  return Collections.unmodifiableList(seasons);
+              }
+
+              public Season getCurrentSeason() {
+                  if (currentSeason < 0 || currentSeason >= seasons.size()) {
+                      return null;
+                  }
+                  return seasons.get(currentSeason);
+              }
+
+              public Episode getCurrentEpisode() {
+                  Season season = getCurrentSeason();
+                  if (season == null || currentEpisode >= season.episodes.size()) {
+                      return null;
+                  }
+                  return season.episodes.get(currentEpisode);
+              }
+
+              public DialogueLine getCurrentDialogue() {
+                  Episode episode = getCurrentEpisode();
+                  if (episode == null || currentDialogue >= episode.dialogue.size()) {
+                      return null;
+                  }
+                  return episode.dialogue.get(currentDialogue);
+              }
+
+              public boolean hasNextDialogue() {
+                  Episode episode = getCurrentEpisode();
+                  return episode != null && currentDialogue < episode.dialogue.size();
+              }
+
+              public DialogueLine nextDialogue() {
+                  Episode episode = getCurrentEpisode();
+                  if (episode == null || waitingForChoice) {
+                      return null;
+                  }
+
+                  if (currentDialogue < episode.dialogue.size()) {
+                      return episode.dialogue.get(currentDialogue++);
+                  }
+
+                  waitingForChoice = true;
+                  return null;
+              }
+
+              public List<StoryChoice> getCurrentChoices() {
+                  Episode episode = getCurrentEpisode();
+                  if (episode == null || !waitingForChoice) {
+                      return Collections.emptyList();
+                  }
+                  return Collections.unmodifiableList(episode.choices);
+              }
+
+              public boolean selectChoice(int choiceIndex) {
+                  Episode episode = getCurrentEpisode();
+
+                  if (episode == null || !waitingForChoice) {
+                      return false;
+                  }
+
+                  if (choiceIndex < 0 || choiceIndex >= episode.choices.size()) {
+                      return false;
+                  }
+
+                  StoryChoice choice = episode.choices.get(choiceIndex);
+                  currentScene = choice.nextScene;
+                  waitingForChoice = false;
+                  completeCurrentEpisode();
+                  return true;
+              }
+
+              public void completeCurrentEpisode() {
+                  Episode episode = getCurrentEpisode();
+                  if (episode == null) return;
+
+                  episode.completed = true;
+                  unlockNextEpisode();
+              }
+
+              private void unlockNextEpisode() {
+                  Season season = getCurrentSeason();
+                  if (season == null) return;
+
+                  if (currentEpisode + 1 < season.episodes.size()) {
+                      season.episodes.get(currentEpisode + 1).unlocked = true;
+                  } else if (currentSeason + 1 < seasons.size()) {
+                      Season nextSeason = seasons.get(currentSeason + 1);
+                      nextSeason.unlocked = true;
+                      if (!nextSeason.episodes.isEmpty()) {
+                          nextSeason.episodes.get(0).unlocked = true;
+                      }
+                  }
+              }
+
+              public boolean startEpisode(int seasonNumber, int episodeNumber) {
+                  int seasonIndex = seasonNumber - 1;
+                  int episodeIndex = episodeNumber - 1;
+
+                  if (seasonIndex < 0 || seasonIndex >= seasons.size()) {
+                      return false;
+                  }
+
+                  Season season = seasons.get(seasonIndex);
+
+                  if (!season.unlocked || episodeIndex < 0 ||
+                      episodeIndex >= season.episodes.size()) {
+                      return false;
+                  }
+
+                  Episode episode = season.episodes.get(episodeIndex);
+                  if (!episode.unlocked) return false;
+
+                  currentSeason = seasonIndex;
+                  currentEpisode = episodeIndex;
+                  currentDialogue = 0;
+                  currentScene = 0;
+                  waitingForChoice = false;
+                  return true;
+              }
+
+              public boolean nextEpisode() {
+                  Season season = getCurrentSeason();
+                  if (season == null) return false;
+
+                  if (currentEpisode + 1 < season.episodes.size()) {
+                      Episode next = season.episodes.get(currentEpisode + 1);
+                      if (!next.unlocked) return false;
+                      currentEpisode++;
+                  } else {
+                      if (currentSeason + 1 >= seasons.size()) return false;
+                      Season nextSeason = seasons.get(currentSeason + 1);
+                      if (!nextSeason.unlocked || nextSeason.episodes.isEmpty()) {
+                          return false;
+                      }
+                      currentSeason++;
+                      currentEpisode = 0;
+                  }
+
+                  currentDialogue = 0;
+                  currentScene = 0;
+                  waitingForChoice = false;
+                  return true;
+              }
+
+              public int getCurrentScene() {
+                  return currentScene;
+              }
+
+              public int getCurrentSeasonNumber() {
+                  return currentSeason + 1;
+              }
+
+              public int getCurrentEpisodeNumber() {
+                  return currentEpisode + 1;
+              }
+
+              public int getCompletedEpisodeCount() {
+                  int count = 0;
+                  for (Season season : seasons) {
+                      for (Episode episode : season.episodes) {
+                          if (episode.completed) count++;
+                      }
+                  }
+                  return count;
+              }
+
+              public int getTotalEpisodeCount() {
+                  return seasons.size() * 24;
+              }
+
+              public int getProgressPercent() {
+                  return getCompletedEpisodeCount() * 100 / getTotalEpisodeCount();
+              }
+
+              public boolean isWaitingForChoice() {
+                  return waitingForChoice;
+              }
+
+              public String exportProgress() {
+                  StringBuilder data = new StringBuilder();
+                  data.append(currentSeason).append(",");
+                  data.append(currentEpisode).append(",");
+
+                  for (Season season : seasons) {
+                      for (Episode episode : season.episodes) {
+                          data.append(episode.unlocked ? "1" : "0");
+                          data.append(episode.completed ? "1" : "0");
+                          data.append(";");
+                      }
+                  }
+
+                  return data.toString();
+              }
+
+              public boolean importProgress(String data) {
+                  if (data == null || data.trim().isEmpty()) return false;
+
+                  try {
+                      String[] sections = data.split(",", 3);
+                      if (sections.length != 3) return false;
+
+                      int savedSeason = Integer.parseInt(sections[0]);
+                      int savedEpisode = Integer.parseInt(sections[1]);
+
+                      if (savedSeason < 0 || savedSeason >= seasons.size()) {
+                          return false;
+                      }
+
+                      String[] states = sections[2].split(";");
+                      int expected = getTotalEpisodeCount();
+                      if (states.length < expected) return false;
+
+                      int index = 0;
+                      for (Season season : seasons) {
+                          for (Episode episode : season.episodes) {
+                              String state = states[index++];
+                              if (state.length() < 2) return false;
+                              episode.unlocked = state.charAt(0) == '1';
+                              episode.completed = state.charAt(1) == '1';
+                          }
+                      }
+
+                      if (savedEpisode < 0 ||
+                          savedEpisode >= seasons.get(savedSeason).episodes.size()) {
+                          return false;
+                      }
+
+                      if (!seasons.get(savedSeason).unlocked ||
+                          !seasons.get(savedSeason).episodes.get(savedEpisode).unlocked) {
+                          currentSeason = 0;
+                          currentEpisode = 0;
+                      } else {
+                          currentSeason = savedSeason;
+                          currentEpisode = savedEpisode;
+                      }
+
+                      currentDialogue = 0;
+                      currentScene = 0;
+                      waitingForChoice = false;
+                      return true;
+                  } catch (Exception error) {
+                      return false;
+                  }
+              }
+
+              public void resetCampaign() {
+                  for (Season season : seasons) {
+                      season.unlocked = false;
+                      for (Episode episode : season.episodes) {
+                          episode.unlocked = false;
+                          episode.completed = false;
+                      }
+                  }
+
+                  currentSeason = 0;
+                  currentEpisode = 0;
+                  currentDialogue = 0;
+                  currentScene = 0;
+                  waitingForChoice = false;
+
+                  seasons.get(0).unlocked = true;
+                  seasons.get(0).episodes.get(0).unlocked = true;
+              }
+          }
+          EOF
+      - name: Generate ILARION LAN Multiplayer System
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/ilarion/game
+          cat > app/src/main/java/com/ilarion/game/LanMultiplayer.java <<'EOF'
+          package com.ilarion.game;
+
+          import java.io.BufferedReader;
+          import java.io.BufferedWriter;
+          import java.io.InputStreamReader;
+          import java.io.OutputStreamWriter;
+          import java.io.IOException;
+          import java.net.InetAddress;
+          import java.net.NetworkInterface;
+          import java.net.ServerSocket;
+          import java.net.Socket;
+          import java.net.SocketException;
+          import java.net.Inet4Address;
+          import java.util.ArrayList;
+          import java.util.Collections;
+          import java.util.Enumeration;
+          import java.util.List;
+          import java.util.Map;
+          import java.util.concurrent.ConcurrentHashMap;
+          import java.util.concurrent.atomic.AtomicBoolean;
+
+          public class LanMultiplayer {
+
+              public static final int DEFAULT_PORT = 27840;
+              public static final int MAX_PLAYERS = 4;
+
+              public interface Listener {
+                  void onConnected(int playerId);
+                  void onDisconnected();
+                  void onPlayerUpdated(PlayerState player);
+                  void onPlayerLeft(int playerId);
+                  void onMessage(String message);
+                  void onError(String error);
+              }
+
+              public static class PlayerState {
+                  public final int id;
+                  public final float x;
+                  public final float y;
+                  public final int health;
+                  public final String action;
+
+                  public PlayerState(int id, float x, float y,
+                                     int health, String action) {
+                      this.id = id;
+                      this.x = x;
+                      this.y = y;
+                      this.health = health;
+                      this.action = action == null ? "idle" : action;
+                  }
+              }
+
+              private final AtomicBoolean running = new AtomicBoolean(false);
+              private final AtomicBoolean connected = new AtomicBoolean(false);
+
+              private final Map<Integer, PlayerState> players =
+                      new ConcurrentHashMap<>();
+
+              private final Map<Integer, ClientHandler> clients =
+                      new ConcurrentHashMap<>();
+
+              private volatile Listener listener;
+              private volatile boolean host;
+              private volatile int localPlayerId = -1;
+
+              private volatile ServerSocket serverSocket;
+              private volatile Socket clientSocket;
+              private volatile BufferedReader clientReader;
+              private volatile BufferedWriter clientWriter;
+
+              private volatile Thread serverThread;
+              private volatile Thread clientReadThread;
+
+              private final Object clientWriteLock = new Object();
+              private final Object broadcastLock = new Object();
+
+              public LanMultiplayer(Listener listener) {
+                  this.listener = listener;
+              }
+
+              public void setListener(Listener listener) {
+                  this.listener = listener;
+              }
+
+              public boolean isHost() {
+                  return host;
+              }
+
+              public boolean isConnected() {
+                  return connected.get();
+              }
+
+              public int getLocalPlayerId() {
+                  return localPlayerId;
+              }
+
+              public int getPlayerCount() {
+                  return players.size();
+              }
+
+              public List<PlayerState> getPlayers() {
+                  return Collections.unmodifiableList(
+                          new ArrayList<>(players.values()));
+              }
+
+              public PlayerState getPlayer(int id) {
+                  return players.get(id);
+              }
+
+              private void notifyMessage(String message) {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onMessage(message);
+                  }
+              }
+
+              private void notifyError(String message) {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onError(message);
+                  }
+              }
+
+              private void notifyConnected(int id) {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onConnected(id);
+                  }
+              }
+
+              private void notifyDisconnected() {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onDisconnected();
+                  }
+              }
+
+              private void notifyPlayerUpdated(PlayerState player) {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onPlayerUpdated(player);
+                  }
+              }
+
+              private void notifyPlayerLeft(int id) {
+                  Listener callback = listener;
+                  if (callback != null) {
+                      callback.onPlayerLeft(id);
+                  }
+              }
+
+              public synchronized boolean startHost() {
+                  return startHost(DEFAULT_PORT);
+              }
+
+              public synchronized boolean startHost(int port) {
+                  if (running.get()) {
+                      notifyError("يوجد اتصال أو غرفة نشطة بالفعل.");
+                      return false;
+                  }
+
+                  if (port < 1024 || port > 65535) {
+                      notifyError("رقم المنفذ غير صالح.");
+                      return false;
+                  }
+
+                  try {
+                      serverSocket = new ServerSocket(port);
+                      serverSocket.setReuseAddress(true);
+
+                      host = true;
+                      localPlayerId = 0;
+                      running.set(true);
+                      connected.set(true);
+
+                      players.clear();
+                      clients.clear();
+
+                      players.put(0, new PlayerState(
+                              0, 0, 0, 100, "idle"));
+
+                      serverThread = new Thread(
+                              this::acceptClients, "ILARION-LAN-Server");
+                      serverThread.start();
+
+                      notifyConnected(0);
+                      notifyMessage("تم إنشاء الغرفة بنجاح.");
+                      return true;
+
+                  } catch (IOException error) {
+                      closeQuietly(serverSocket);
+                      serverSocket = null;
+                      running.set(false);
+                      connected.set(false);
+                      host = false;
+                      localPlayerId = -1;
+
+                      notifyError("تعذر إنشاء الغرفة: " + error.getMessage());
+                      return false;
+                  }
+              }
+
+              private void acceptClients() {
+                  while (running.get()) {
+                      Socket socket = null;
+
+                      try {
+                          socket = serverSocket.accept();
+                          socket.setTcpNoDelay(true);
+                          socket.setKeepAlive(true);
+
+                          if (clients.size() >= MAX_PLAYERS - 1) {
+                              sendRawAndClose(socket, "FULL");
+                              continue;
+                          }
+
+                          int playerId = findFreePlayerId();
+
+                          if (playerId < 1) {
+                              sendRawAndClose(socket, "FULL");
+                              continue;
+                          }
+
+                          ClientHandler handler =
+                                  new ClientHandler(playerId, socket);
+
+                          clients.put(playerId, handler);
+
+                          PlayerState newPlayer = new PlayerState(
+                                  playerId, 0, 0, 100, "idle");
+
+                          players.put(playerId, newPlayer);
+
+                          handler.send("WELCOME|" + playerId);
+
+                          broadcast("PLAYER|" + playerId +
+                                  "|0|0|100|idle");
+
+                          notifyPlayerUpdated(newPlayer);
+                          notifyMessage("انضم لاعب جديد: " + playerId);
+
+                          handler.start();
+
+                      } catch (IOException error) {
+                          if (running.get()) {
+                              notifyError("مشكلة في استقبال لاعب: " +
+                                      error.getMessage());
+                          }
+
+                          closeQuietly(socket);
+                      }
+                  }
+              }
+
+              private int findFreePlayerId() {
+                  for (int id = 1; id < MAX_PLAYERS; id++) {
+                      if (!clients.containsKey(id)) {
+                          return id;
+                      }
+                  }
+                  return -1;
+              }
+
+              private void sendRawAndClose(Socket socket, String message) {
+                  try {
+                      BufferedWriter writer = new BufferedWriter(
+                              new OutputStreamWriter(
+                                      socket.getOutputStream()));
+                      writer.write(message);
+                      writer.newLine();
+                      writer.flush();
+                  } catch (IOException ignored) {
+                  }
+
+                  closeQuietly(socket);
+              }
+
+              private class ClientHandler extends Thread {
+                  private final int playerId;
+                  private final Socket socket;
+                  private BufferedReader reader;
+                  private BufferedWriter writer;
+                  private final AtomicBoolean active =
+                          new AtomicBoolean(true);
+                  private final Object writeLock = new Object();
+
+                  ClientHandler(int playerId, Socket socket) {
+                      this.playerId = playerId;
+                      this.socket = socket;
+                      setName("ILARION-Client-" + playerId);
+                  }
+
+                  void send(String message) {
+                      if (!active.get()) return;
+
+                      synchronized (writeLock) {
+                          try {
+                              if (writer == null) {
+                                  writer = new BufferedWriter(
+                                          new OutputStreamWriter(
+                                                  socket.getOutputStream()));
+                              }
+
+                              writer.write(message);
+                              writer.newLine();
+                              writer.flush();
+
+                          } catch (IOException error) {
+                              closeHandler();
+                          }
+                      }
+                  }
+
+                  @Override
+                  public void run() {
+                      try {
+                          reader = new BufferedReader(
+                                  new InputStreamReader(
+                                          socket.getInputStream()));
+
+                          while (running.get() && active.get()) {
+                              String line = reader.readLine();
+
+                              if (line == null) {
+                                  break;
+                              }
+
+                              processClientMessage(playerId, line);
+                          }
+
+                      } catch (IOException error) {
+                          if (running.get() && active.get()) {
+                              notifyMessage(
+                                      "انقطع اتصال اللاعب " + playerId);
+                          }
+                      } finally {
+                          closeHandler();
+                      }
+                  }
+
+                  void closeHandler() {
+                      if (!active.compareAndSet(true, false)) return;
+
+                      closeQuietly(socket);
+                      clients.remove(playerId, this);
+                      players.remove(playerId);
+
+                      if (running.get()) {
+                          broadcast("REMOVE|" + playerId);
+                          notifyPlayerLeft(playerId);
+                          notifyMessage("غادر اللاعب: " + playerId);
+                      }
+                  }
+              }
+
+              private void processClientMessage(int playerId, String line) {
+                  if (line == null || line.length() > 512) return;
+
+                  String[] parts = line.split("\\\\|", 5);
+
+                  if (parts.length < 5 || !"STATE".equals(parts[0])) {
+                      return;
+                  }
+
+                  try {
+                      float x = Float.parseFloat(parts[1]);
+                      float y = Float.parseFloat(parts[2]);
+                      int health = Integer.parseInt(parts[3]);
+                      String action = cleanAction(parts[4]);
+
+                      if (Float.isNaN(x) || Float.isInfinite(x) ||
+                          Float.isNaN(y) || Float.isInfinite(y)) {
+                          return;
+                      }
+
+                      health = Math.max(0, Math.min(100, health));
+
+                      PlayerState state = new PlayerState(
+                              playerId, x, y, health, action);
+
+                      players.put(playerId, state);
+
+                      notifyPlayerUpdated(state);
+
+                      broadcast("PLAYER|" + playerId + "|" +
+                              x + "|" + y + "|" + health + "|" + action);
+
+                  } catch (NumberFormatException ignored) {
+                  }
+              }
+
+              public synchronized boolean joinRoom(String ipAddress) {
+                  return joinRoom(ipAddress, DEFAULT_PORT);
+              }
+
+              public synchronized boolean joinRoom(
+                      String ipAddress, int port) {
+
+                  if (running.get()) {
+                      notifyError("أغلق الاتصال الحالي أولاً.");
+                      return false;
+                  }
+
+                  if (ipAddress == null || ipAddress.trim().isEmpty()) {
+                      notifyError("أدخل عنوان IP المضيف.");
+                      return false;
+                  }
+
+                  if (port < 1024 || port > 65535) {
+                      notifyError("رقم المنفذ غير صالح.");
+                      return false;
+                  }
+
+                  try {
+                      String address = ipAddress.trim();
+
+                      if (address.contains(":")) {
+                          notifyError("أدخل IP فقط دون رقم المنفذ.");
+                          return false;
+                      }
+
+                      Socket socket = new Socket();
+                      socket.connect(
+                              new java.net.InetSocketAddress(address, port),
+                              7000);
+                      socket.setTcpNoDelay(true);
+                      socket.setKeepAlive(true);
+
+                      clientSocket = socket;
+                      clientReader = new BufferedReader(
+                              new InputStreamReader(
+                                      socket.getInputStream()));
+                      clientWriter = new BufferedWriter(
+                              new OutputStreamWriter(
+                                      socket.getOutputStream()));
+
+                      String welcome = clientReader.readLine();
+
+                      if (welcome == null || !welcome.startsWith("WELCOME|")) {
+                          closeQuietly(socket);
+                          clientSocket = null;
+                          notifyError("تعذر الانضمام إلى الغرفة.");
+                          return false;
+                      }
+
+                      int assignedId = Integer.parseInt(
+                              welcome.substring("WELCOME|".length()));
+
+                      if (assignedId < 1 || assignedId >= MAX_PLAYERS) {
+                          closeQuietly(socket);
+                          clientSocket = null;
+                          notifyError("استلمنا رقم لاعب غير صالح.");
+                          return false;
+                      }
+
+                      host = false;
+                      localPlayerId = assignedId;
+                      running.set(true);
+                      connected.set(true);
+
+                      players.clear();
+                      players.put(assignedId, new PlayerState(
+                              assignedId, 0, 0, 100, "idle"));
+
+                      clientReadThread = new Thread(
+                              this::readServerMessages,
+                              "ILARION-LAN-Client");
+                      clientReadThread.start();
+
+                      notifyConnected(assignedId);
+                      notifyMessage("تم الانضمام إلى غرفة إيلاريون.");
+                      return true;
+
+                  } catch (Exception error) {
+                      disconnect();
+                      notifyError("فشل الاتصال: " + error.getMessage());
+                      return false;
+                  }
+              }
+
+              private void readServerMessages() {
+                  try {
+                      while (running.get() && clientSocket != null &&
+                              !clientSocket.isClosed()) {
+
+                          String line = clientReader.readLine();
+                          if (line == null) break;
+
+                          processServerMessage(line);
+                      }
+
+                  } catch (IOException error) {
+                      if (running.get()) {
+                          notifyMessage("انقطع الاتصال بالمضيف.");
+                      }
+                  } finally {
+                      if (!host && running.get()) {
+                          disconnect();
+                      }
+                  }
+              }
+
+              private void processServerMessage(String line) {
+                  if (line == null || line.length() > 512) return;
+
+                  String[] parts = line.split("\\\\|", 6);
+
+                  if ("PLAYER".equals(parts[0]) && parts.length >= 6) {
+                      try {
+                          int id = Integer.parseInt(parts[1]);
+                          float x = Float.parseFloat(parts[2]);
+                          float y = Float.parseFloat(parts[3]);
+                          int health = Integer.parseInt(parts[4]);
+                          String action = cleanAction(parts[5]);
+
+                          if (id < 0 || id >= MAX_PLAYERS ||
+                              Float.isNaN(x) || Float.isInfinite(x) ||
+                              Float.isNaN(y) || Float.isInfinite(y)) {
+                              return;
+                          }
+
+                          PlayerState state = new PlayerState(
+                                  id, x, y,
+                                  Math.max(0, Math.min(100, health)),
+                                  action);
+
+                          players.put(id, state);
+                          notifyPlayerUpdated(state);
+
+                      } catch (NumberFormatException ignored) {
+                      }
+
+                  } else if ("REMOVE".equals(parts[0]) &&
+                             parts.length >= 2) {
+                      try {
+                          int id = Integer.parseInt(parts[1]);
+                          players.remove(id);
+                          notifyPlayerLeft(id);
+                      } catch (NumberFormatException ignored) {
+                      }
+
+                  } else if ("FULL".equals(parts[0])) {
+                      notifyError("الغرفة ممتلئة. الحد الأقصى أربعة لاعبين.");
+                      disconnect();
+
+                  } else if ("MESSAGE".equals(parts[0]) &&
+                             parts.length >= 2) {
+                      notifyMessage(parts[1]);
+                  }
+              }
+
+              public void sendPlayerState(
+                      float x, float y, int health, String action) {
+
+                  if (!connected.get()) return;
+
+                  if (Float.isNaN(x) || Float.isInfinite(x) ||
+                      Float.isNaN(y) || Float.isInfinite(y)) {
+                      return;
+                  }
+
+                  int safeHealth = Math.max(0, Math.min(100, health));
+                  String safeAction = cleanAction(action);
+
+                  PlayerState state = new PlayerState(
+                          localPlayerId, x, y, safeHealth, safeAction);
+
+                  players.put(localPlayerId, state);
+                  notifyPlayerUpdated(state);
+
+                  String packet = "STATE|" + x + "|" + y + "|" +
+                          safeHealth + "|" + safeAction;
+
+                  if (host) {
+                      broadcast("PLAYER|" + localPlayerId + "|" +
+                              x + "|" + y + "|" + safeHealth + "|" +
+                              safeAction);
+                  } else {
+                      sendToServer(packet);
+                  }
+              }
+
+              private String cleanAction(String action) {
+                  if (action == null || action.trim().isEmpty()) {
+                      return "idle";
+                  }
+
+                  return action.replace("|", "_")
+                          .replace("\\n", "_")
+                          .replace("\\r", "_")
+                          .substring(0, Math.min(action.length(), 32));
+              }
+
+              private void sendToServer(String message) {
+                  if (!connected.get() || host) return;
+
+                  synchronized (clientWriteLock) {
+                      try {
+                          if (clientWriter == null) return;
+
+                          clientWriter.write(message);
+                          clientWriter.newLine();
+                          clientWriter.flush();
+
+                      } catch (IOException error) {
+                          notifyError("تعذر إرسال بيانات اللاعب.");
+                          disconnect();
+                      }
+                  }
+              }
+
+              private void broadcast(String message) {
+                  if (!host || !running.get()) return;
+
+                  synchronized (broadcastLock) {
+                      for (ClientHandler client :
+                              new ArrayList<>(clients.values())) {
+                          client.send(message);
+                      }
+                  }
+              }
+
+              public void sendRoomMessage(String message) {
+                  if (!connected.get() || message == null) return;
+
+                  String safe = message.replace("|", " ")
+                          .replace("\\n", " ")
+                          .replace("\\r", " ");
+
+                  if (safe.length() > 120) {
+                      safe = safe.substring(0, 120);
+                  }
+
+                  if (host) {
+                      broadcast("MESSAGE|" + safe);
+                      notifyMessage(safe);
+                  } else {
+                      sendToServer("CHAT|" + safe);
+                  }
+              }
+
+              public String getLocalIpAddress() {
+                  try {
+                      Enumeration<NetworkInterface> interfaces =
+                              NetworkInterface.getNetworkInterfaces();
+
+                      while (interfaces.hasMoreElements()) {
+                          NetworkInterface network =
+                                  interfaces.nextElement();
+
+                          if (!network.isUp() || network.isLoopback()) {
+                              continue;
+                          }
+
+                          Enumeration<InetAddress> addresses =
+                                  network.getInetAddresses();
+
+                          while (addresses.hasMoreElements()) {
+                              InetAddress address = addresses.nextElement();
+
+                              if (address instanceof Inet4Address &&
+                                  !address.isLoopbackAddress()) {
+                                  String ip = address.getHostAddress();
+
+                                  if (ip.startsWith("192.168.") ||
+                                      ip.startsWith("10.") ||
+                                      ip.startsWith("172.")) {
+                                      return ip;
+                                  }
+                              }
+                          }
+                      }
+
+                  } catch (SocketException ignored) {
+                  }
+
+                  return "IP غير متاح";
+              }
+
+              public String getRoomAddress() {
+                  return getLocalIpAddress() + ":" + DEFAULT_PORT;
+              }
+
+              public synchronized void disconnect() {
+                  boolean wasRunning = running.getAndSet(false);
+                  connected.set(false);
+
+                  if (host) {
+                      for (ClientHandler client :
+                              new ArrayList<>(clients.values())) {
+                          client.active.set(false);
+                          closeQuietly(client.socket);
+                      }
+
+                      clients.clear();
+
+                      closeQuietly(serverSocket);
+                      serverSocket = null;
+
+                  } else {
+                      closeQuietly(clientSocket);
+                      closeQuietly(clientReader);
+                      closeQuietly(clientWriter);
+
+                      clientSocket = null;
+                      clientReader = null;
+                      clientWriter = null;
+                  }
+
+                  players.clear();
+
+                  host = false;
+                  localPlayerId = -1;
+
+                  if (wasRunning) {
+                      notifyDisconnected();
+                  }
+              }
+
+              private void closeQuietly(Socket socket) {
+                  if (socket == null) return;
+                  try {
+                      socket.close();
+                  } catch (IOException ignored) {
+                  }
+              }
+
+              private void closeQuietly(ServerSocket socket) {
+                  if (socket == null) return;
+                  try {
+                      socket.close();
+                  } catch (IOException ignored) {
+                  }
+              }
+
+              private void closeQuietly(BufferedReader reader) {
+                  if (reader == null) return;
+                  try {
+                      reader.close();
+                  } catch (IOException ignored) {
+                  }
+              }
+
+              private void closeQuietly(BufferedWriter writer) {
+                  if (writer == null) return;
+                  try {
+                      writer.close();
+                  } catch (IOException ignored) {
+                  }
+              }
+          }
+          EOF
+      - name: Generate ILARION Game UI Controls Save and Audio
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/ilarion/game
+          cat > app/src/main/java/com/ilarion/game/GameUI.java <<'EOF'
+          package com.ilarion.game;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.graphics.Canvas;
+          import android.graphics.Color;
+          import android.graphics.Paint;
+          import android.graphics.RectF;
+          import android.media.AudioManager;
+          import android.media.ToneGenerator;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.EditText;
+          import android.widget.FrameLayout;
+          import android.widget.Toast;
+
+          public class GameUI extends View {
+
+              public interface Listener {
+                  void onStartSinglePlayer();
+                  void onCreateRoom();
+                  void onJoinRoom(String ipAddress);
+                  void onAttack();
+                  void onJump();
+                  void onMove(float direction);
+                  void onPauseGame();
+                  void onResumeGame();
+              }
+
+              private static final int MENU = 0;
+              private static final int GAME = 1;
+              private static final int PAUSED = 2;
+              private static final int ROOM = 3;
+
+              private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+              private final SharedPreferences preferences;
+              private final ToneGenerator tone;
+
+              private Listener listener;
+              private int screen = MENU;
+              private boolean soundEnabled = true;
+              private boolean controlsEnabled = true;
+              private String roomAddress = "لم يتم إنشاء غرفة";
+              private String statusMessage = "استعد للمعركة";
+              private float touchX;
+              private float touchY;
+              private float scaleX = 1f;
+              private float scaleY = 1f;
+
+              private RectF singleButton;
+              private RectF hostButton;
+              private RectF joinButton;
+              private RectF soundButton;
+              private RectF resumeButton;
+              private RectF pauseButton;
+              private RectF leftButton;
+              private RectF rightButton;
+              private RectF jumpButton;
+              private RectF attackButton;
+
+              private boolean movingLeft;
+              private boolean movingRight;
+
+              public GameUI(Context context) {
+                  super(context);
+
+                  preferences = context.getSharedPreferences(
+                          "ilarion_settings", Context.MODE_PRIVATE);
+
+                  soundEnabled = preferences.getBoolean(
+                          "sound_enabled", true);
+
+                  controlsEnabled = preferences.getBoolean(
+                          "controls_enabled", true);
+
+                  tone = new ToneGenerator(
+                          AudioManager.STREAM_MUSIC, 65);
+
+                  paint.setTextAlign(Paint.Align.CENTER);
+                  paint.setStrokeWidth(3f);
+
+                  setFocusable(true);
+                  setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+              }
+
+              public void setListener(Listener listener) {
+                  this.listener = listener;
+              }
+
+              public void setRoomAddress(String address) {
+                  roomAddress = address == null
+                          ? "لم يتم إنشاء غرفة" : address;
+                  invalidate();
+              }
+
+              public void setStatusMessage(String message) {
+                  statusMessage = message == null ? "" : message;
+                  invalidate();
+              }
+
+              public int getScreen() {
+                  return screen;
+              }
+
+              public void showMainMenu() {
+                  screen = MENU;
+                  invalidate();
+              }
+
+              public void showGame() {
+                  screen = GAME;
+                  playTone(ToneGenerator.TONE_PROP_ACK);
+                  invalidate();
+              }
+
+              public void showRoom() {
+                  screen = ROOM;
+                  invalidate();
+              }
+
+              public void pauseGame() {
+                  if (screen == GAME) {
+                      screen = PAUSED;
+                      if (listener != null) listener.onPauseGame();
+                      playTone(ToneGenerator.TONE_PROP_BEEP);
+                      invalidate();
+                  }
+              }
+
+              public void resumeGame() {
+                  if (screen == PAUSED) {
+                      screen = GAME;
+                      if (listener != null) listener.onResumeGame();
+                      playTone(ToneGenerator.TONE_PROP_ACK);
+                      invalidate();
+                  }
+              }
+
+              private void playTone(int toneType) {
+                  if (soundEnabled && tone != null) {
+                      try {
+                          tone.startTone(toneType, 100);
+                      } catch (Exception ignored) {
+                      }
+                  }
+              }
+
+              private void rounded(Canvas canvas, RectF rect,
+                                   int color, float radius) {
+                  paint.setColor(color);
+                  paint.setStyle(Paint.Style.FILL);
+                  canvas.drawRoundRect(rect, radius, radius, paint);
+              }
+
+              private void drawText(Canvas canvas, String text,
+                                    float x, float y, float size,
+                                    int color) {
+                  paint.setColor(color);
+                  paint.setTextSize(size);
+                  paint.setTypeface(
+                          android.graphics.Typeface.create(
+                                  "sans-serif", android.graphics.Typeface.BOLD));
+                  canvas.drawText(text, x, y, paint);
+              }
+
+              private RectF button(float centerX, float centerY,
+                                   float width, float height) {
+                  return new RectF(
+                          centerX - width / 2f,
+                          centerY - height / 2f,
+                          centerX + width / 2f,
+                          centerY + height / 2f);
+              }
+
+              private void drawButton(Canvas canvas, RectF rect,
+                                      String label, int color,
+                                      float textSize) {
+                  rounded(canvas, rect, color, 18f);
+                  drawText(canvas, label,
+                          rect.centerX(),
+                          rect.centerY() + textSize * 0.34f,
+                          textSize, Color.WHITE);
+              }
+
+              @Override
+              protected void onDraw(Canvas canvas) {
+                  super.onDraw(canvas);
+
+                  float width = getWidth();
+                  float height = getHeight();
+
+                  if (width <= 0 || height <= 0) return;
+
+                  scaleX = width / 960f;
+                  scaleY = height / 540f;
+
+                  canvas.save();
+                  canvas.scale(scaleX, scaleY);
+
+                  if (screen == MENU) {
+                      drawMainMenu(canvas);
+                  } else if (screen == GAME) {
+                      drawGameControls(canvas);
+                  } else if (screen == PAUSED) {
+                      drawPauseMenu(canvas);
+                  } else if (screen == ROOM) {
+                      drawRoomMenu(canvas);
+                  }
+
+                  canvas.restore();
+              }
+
+              private void drawBackground(Canvas canvas) {
+                  paint.setShader(null);
+                  paint.setColor(Color.rgb(9, 8, 20));
+                  canvas.drawRect(0, 0, 960, 540, paint);
+
+                  paint.setColor(Color.rgb(20, 16, 42));
+                  canvas.drawCircle(170, 130, 95, paint);
+                  canvas.drawCircle(780, 370, 145, paint);
+
+                  paint.setColor(Color.rgb(50, 24, 70));
+                  canvas.drawRect(0, 430, 960, 540, paint);
+
+                  paint.setColor(Color.rgb(110, 45, 110));
+                  for (int i = 0; i < 18; i++) {
+                      float x = (i * 83) % 960;
+                      float y = 30 + ((i * 47) % 370);
+                      canvas.drawCircle(x, y, 2.5f, paint);
+                  }
+              }
+
+              private void drawMainMenu(Canvas canvas) {
+                  drawBackground(canvas);
+
+                  drawText(canvas, "ILARION",
+                          480, 105, 66, Color.WHITE);
+
+                  drawText(canvas, "THE END OF CREATION",
+                          480, 145, 21, Color.rgb(205, 150, 240));
+
+                  singleButton = button(480, 235, 330, 58);
+                  hostButton = button(480, 310, 330, 58);
+                  joinButton = button(480, 385, 330, 58);
+                  soundButton = button(480, 465, 230, 45);
+
+                  drawButton(canvas, singleButton,
+                          "اللعب الفردي",
+                          Color.rgb(105, 45, 145), 25);
+
+                  drawButton(canvas, hostButton,
+                          "إنشاء غرفة",
+                          Color.rgb(45, 105, 145), 25);
+
+                  drawButton(canvas, joinButton,
+                          "الانضمام إلى غرفة",
+                          Color.rgb(55, 115, 95), 23);
+
+                  drawButton(canvas, soundButton,
+                          soundEnabled ? "الصوت: يعمل" : "الصوت: متوقف",
+                          Color.rgb(65, 60, 85), 19);
+              }
+
+              private void drawGameControls(Canvas canvas) {
+                  drawBackground(canvas);
+
+                  pauseButton = button(910, 38, 75, 48);
+                  drawButton(canvas, pauseButton,
+                          "||", Color.rgb(75, 65, 100), 25);
+
+                  if (!controlsEnabled) return;
+
+                  leftButton = button(95, 445, 95, 75);
+                  rightButton = button(205, 445, 95, 75);
+                  jumpButton = button(760, 445, 100, 75);
+                  attackButton = button(875, 445, 115, 75);
+
+                  drawButton(canvas, leftButton,
+                          "◀", Color.rgb(55, 75, 115), 30);
+
+                  drawButton(canvas, rightButton,
+                          "▶", Color.rgb(55, 75, 115), 30);
+
+                  drawButton(canvas, jumpButton,
+                          "قفز", Color.rgb(55, 115, 105), 22);
+
+                  drawButton(canvas, attackButton,
+                          "هجوم", Color.rgb(145, 45, 65), 22);
+              }
+
+              private void drawPauseMenu(Canvas canvas) {
+                  drawBackground(canvas);
+
+                  rounded(canvas, new RectF(270, 100, 690, 450),
+                          Color.argb(235, 20, 16, 35), 24);
+
+                  drawText(canvas, "إيقاف مؤقت",
+                          480, 160, 38, Color.WHITE);
+
+                  resumeButton = button(480, 255, 270, 60);
+                  soundButton = button(480, 335, 270, 55);
+                  hostButton = button(480, 405, 270, 50);
+
+                  drawButton(canvas, resumeButton,
+                          "متابعة اللعب",
+                          Color.rgb(55, 125, 95), 23);
+
+                  drawButton(canvas, soundButton,
+                          soundEnabled ? "الصوت: يعمل" : "الصوت: متوقف",
+                          Color.rgb(75, 65, 105), 20);
+
+                  drawButton(canvas, hostButton,
+                          "القائمة الرئيسية",
+                          Color.rgb(125, 55, 65), 19);
+              }
+
+              private void drawRoomMenu(Canvas canvas) {
+                  drawBackground(canvas);
+
+                  rounded(canvas, new RectF(160, 75, 800, 465),
+                          Color.argb(235, 20, 16, 35), 22);
+
+                  drawText(canvas, "غرفة إيلاريون",
+                          480, 135, 38, Color.WHITE);
+
+                  drawText(canvas, "عنوان الغرفة:",
+                          480, 210, 24, Color.LIGHT_GRAY);
+
+                  drawText(canvas, roomAddress,
+                          480, 255, 26, Color.rgb(180, 220, 255));
+
+                  drawText(canvas, statusMessage,
+                          480, 300, 20, Color.WHITE);
+
+                  resumeButton = button(480, 380, 260, 58);
+                  hostButton = button(480, 435, 260, 48);
+
+                  drawButton(canvas, resumeButton,
+                          "العودة إلى اللعبة",
+                          Color.rgb(55, 125, 95), 21);
+
+                  drawButton(canvas, hostButton,
+                          "القائمة الرئيسية",
+                          Color.rgb(105, 55, 85), 18);
+              }
+
+              @Override
+              public boolean onTouchEvent(MotionEvent event) {
+                  float x = event.getX() / scaleX;
+                  float y = event.getY() / scaleY;
+
+                  if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                      touchX = x;
+                      touchY = y;
+
+                      if (screen == GAME) {
+                          return handleGameTouch(x, y, event);
+                      }
+
+                      return true;
+                  }
+
+                  if (event.getAction() == MotionEvent.ACTION_MOVE) {
+                      if (screen == GAME) {
+                          updateMovement(x);
+                      }
+                      return true;
+                  }
+
+                  if (event.getAction() == MotionEvent.ACTION_UP ||
+                      event.getAction() == MotionEvent.ACTION_CANCEL) {
+
+                      movingLeft = false;
+                      movingRight = false;
+
+                      if (screen != GAME) {
+                          handleMenuTouch(x, y);
+                      }
+
+                      invalidate();
+                      return true;
+                  }
+
+                  return true;
+              }
+
+              private boolean handleGameTouch(
+                      float x, float y, MotionEvent event) {
+
+                  if (pauseButton != null &&
+                      pauseButton.contains(x, y)) {
+                      pauseGame();
+                      return true;
+                  }
+
+                  if (!controlsEnabled) return true;
+
+                  if (leftButton != null && leftButton.contains(x, y)) {
+                      movingLeft = true;
+                      if (listener != null) listener.onMove(-1f);
+                      return true;
+                  }
+
+                  if (rightButton != null && rightButton.contains(x, y)) {
+                      movingRight = true;
+                      if (listener != null) listener.onMove(1f);
+                      return true;
+                  }
+
+                  if (jumpButton != null && jumpButton.contains(x, y)) {
+                      if (listener != null) listener.onJump();
+                      playTone(ToneGenerator.TONE_PROP_ACK);
+                      return true;
+                  }
+
+                  if (attackButton != null && attackButton.contains(x, y)) {
+                      if (listener != null) listener.onAttack();
+                      playTone(ToneGenerator.TONE_PROP_NACK);
+                      return true;
+                  }
+
+                  return true;
+              }
+
+              private void updateMovement(float x) {
+                  if (leftButton != null && leftButton.contains(x, touchY)) {
+                      movingLeft = true;
+                      movingRight = false;
+                      if (listener != null) listener.onMove(-1f);
+
+                  } else if (rightButton != null &&
+                             rightButton.contains(x, touchY)) {
+                      movingRight = true;
+                      movingLeft = false;
+                      if (listener != null) listener.onMove(1f);
+                  }
+              }
+
+              private void handleMenuTouch(float x, float y) {
+                  if (screen == MENU) {
+                      if (singleButton != null &&
+                          singleButton.contains(x, y)) {
+                          if (listener != null) {
+                              listener.onStartSinglePlayer();
+                          }
+                          showGame();
+                          return;
+                      }
+
+                      if (hostButton != null &&
+                          hostButton.contains(x, y)) {
+                          if (listener != null) {
+                              listener.onCreateRoom();
+                          }
+                          showRoom();
+                          return;
+                      }
+
+                      if (joinButton != null &&
+                          joinButton.contains(x, y)) {
+                          showJoinDialog();
+                          return;
+                      }
+
+                      if (soundButton != null &&
+                          soundButton.contains(x, y)) {
+                          toggleSound();
+                      }
+
+                  } else if (screen == PAUSED) {
+                      if (resumeButton != null &&
+                          resumeButton.contains(x, y)) {
+                          resumeGame();
+                          return;
+                      }
+
+                      if (soundButton != null &&
+                          soundButton.contains(x, y)) {
+                          toggleSound();
+                          return;
+                      }
+
+                      if (hostButton != null &&
+                          hostButton.contains(x, y)) {
+                          screen = MENU;
+                          invalidate();
+                      }
+
+                  } else if (screen == ROOM) {
+                      if (resumeButton != null &&
+                          resumeButton.contains(x, y)) {
+                          showGame();
+                          return;
+                      }
+
+                      if (hostButton != null &&
+                          hostButton.contains(x, y)) {
+                          screen = MENU;
+                          invalidate();
+                      }
+                  }
+              }
+
+              private void showJoinDialog() {
+                  final EditText input = new EditText(getContext());
+                  input.setSingleLine(true);
+                  input.setHint("مثال: 192.168.1.5");
+                  input.setInputType(
+                          android.text.InputType.TYPE_CLASS_TEXT |
+                          android.text.InputType.TYPE_TEXT_VARIATION_URI);
+
+                  new AlertDialog.Builder(getContext())
+                          .setTitle("الانضمام إلى غرفة")
+                          .setMessage("أدخل عنوان IP الخاص بالمضيف")
+                          .setView(input)
+                          .setNegativeButton("إلغاء", (dialog, which) -> {
+                              dialog.dismiss();
+                          })
+                          .setPositiveButton("اتصال", (dialog, which) -> {
+                              String ip = input.getText().toString().trim();
+
+                              if (ip.isEmpty()) {
+                                  Toast.makeText(getContext(),
+                                          "أدخل عنوان IP أولاً",
+                                          Toast.LENGTH_SHORT).show();
+                                  return;
+                              }
+
+                              if (listener != null) {
+                                  listener.onJoinRoom(ip);
+                              }
+                          })
+                          .show();
+              }
+
+              private void toggleSound() {
+                  soundEnabled = !soundEnabled;
+
+                  preferences.edit()
+                          .putBoolean("sound_enabled", soundEnabled)
+                          .apply();
+
+                  if (soundEnabled) {
+                      playTone(ToneGenerator.TONE_PROP_ACK);
+                  }
+
+                  invalidate();
+              }
+
+              public void setControlsEnabled(boolean enabled) {
+                  controlsEnabled = enabled;
+
+                  preferences.edit()
+                          .putBoolean("controls_enabled", enabled)
+                          .apply();
+
+                  invalidate();
+              }
+
+              public void saveCampaign(StoryCampaign campaign) {
+                  if (campaign == null) return;
+
+                  preferences.edit()
+                          .putString("campaign_progress",
+                                  campaign.exportProgress())
+                          .apply();
+              }
+
+              public boolean loadCampaign(StoryCampaign campaign) {
+                  if (campaign == null) return false;
+
+                  String saved = preferences.getString(
+                          "campaign_progress", null);
+
+                  if (saved == null) return false;
+
+                  return campaign.importProgress(saved);
+              }
+
+              public void savePlayerData(
+                      int level, int experience, int coins) {
+
+                  preferences.edit()
+                          .putInt("player_level", Math.max(1, level))
+                          .putInt("player_experience",
+                                  Math.max(0, experience))
+                          .putInt("player_coins", Math.max(0, coins))
+                          .apply();
+              }
+
+              public int getSavedLevel() {
+                  return preferences.getInt("player_level", 1);
+              }
+
+              public int getSavedExperience() {
+                  return preferences.getInt("player_experience", 0);
+              }
+
+              public int getSavedCoins() {
+                  return preferences.getInt("player_coins", 0);
+              }
+
+              public void clearSavedData() {
+                  preferences.edit().clear().apply();
+              }
+
+              public static GameUI attach(
+                      Activity activity,
+                      View gameView,
+                      Listener listener) {
+
+                  if (activity == null || gameView == null) {
+                      throw new IllegalArgumentException(
+                              "Activity and gameView are required");
+                  }
+
+                  FrameLayout root = new FrameLayout(activity);
+
+                  ViewGroup parent = (ViewGroup) gameView.getParent();
+
+                  if (parent != null) {
+                      parent.removeView(gameView);
+                  }
+
+                  root.addView(gameView,
+                          new FrameLayout.LayoutParams(
+                                  ViewGroup.LayoutParams.MATCH_PARENT,
+                                  ViewGroup.LayoutParams.MATCH_PARENT));
+
+                  GameUI overlay = new GameUI(activity);
+                  overlay.setListener(listener);
+
+                  root.addView(overlay,
+                          new FrameLayout.LayoutParams(
+                                  ViewGroup.LayoutParams.MATCH_PARENT,
+                                  ViewGroup.LayoutParams.MATCH_PARENT));
+
+                  activity.setContentView(root);
+
+                  return overlay;
+              }
+
+              public void release() {
+                  try {
+                      tone.release();
+                  } catch (Exception ignored) {
+                  }
+              }
+          }
+          EOF
